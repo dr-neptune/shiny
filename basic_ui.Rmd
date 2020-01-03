@@ -1,0 +1,195 @@
+# Basic UI 
+
+```{r}
+library(tidyverse)
+library(magrittr)
+library(shiny)
+```
+
+## Free Text 
+
+```{r}
+ui <- fluidPage(
+    # collect small amounts of text
+    textInput("name", "What's your name?"),
+    # enter passwords
+    passwordInput("password", "What's your password?"),
+    # paragraphs of text
+    textAreaInput("story", "Tell me about yourself", rows = 3)    
+)
+```
+
+If we want to ensure that text has certain properties we can use validate(). 
+
+## Numeric Inputs 
+
+```{r}
+ui <- fluidPage(
+    # collect numbers in a constrained textbox
+    numericInput("num", "Number One", value = 0, min = 0, max = 100),
+    # number slider
+    sliderInput("num2", "Number Two", value = 50, min = 0, max = 100),
+    # double ended number slider (range)
+    sliderInput("num3", "Range", value = c(10, 20), min = 0, max = 100)
+)
+```
+
+## Dates 
+
+```{r}
+ui <- fluidPage(
+    dateInput("dob", "When were you born?"),
+    dateRangeInput("holiday", "When do you want to go on vacation next?")
+)
+```
+
+Arguments like datesdisabled and daysofweekdisabled allow us to restrict the set of valid inputs.
+
+## Limited Choices 
+
+```{r}
+animals <- c("dog", "cat", "mouse", "bird", "other")
+
+ui <- fluidPage(
+    # input selector
+    selectInput("state", "What's your favorite state?", state.name),
+    # radio button choices
+    radioButtons("animal", "What's your favorite animal?", animals)
+)
+```
+
+
+Radio buttons can also show options other than plain text 
+
+```{r}
+ui <- fluidPage(
+    radioButtons("rb", "Choose One:",
+                 choiceNames = list(
+                     icon("angry"),
+                     icon("smile"),
+                     icon("sad-tear")),
+                 choiceValues = list("angry", "happy", "sad")))
+```
+
+With selectInputs we can also allow for multiple choices 
+
+```{r}
+ui <- fluidPage(selectInput("state", "What's your favorite state?",
+                            state.name, multiple = TRUE))
+```
+
+The multiple alternative for radio buttons is the check box
+
+```{r}
+ui <- fluidPage(checkboxGroupInput("animal", "What animals do you like?", animals))
+```
+
+If we want a single checkbox for a single yes/no question, use checkboxInput()
+
+```{r}
+ui <- fluidPage(
+    checkboxInput("cleanup", "Clean Up?", value = TRUE),
+    checkboxInput("shutdown", "Shutdown?"))
+```
+
+## File Uploads 
+
+```{r}
+ui <- fluidPage(fileInput("upload", NULL))
+```
+
+This requires special handling on the server side and is covered later. 
+
+## Action Buttons 
+
+```{r}
+ui <- fluidPage(
+    actionButton("click", "Click me!"),
+    actionButton("drink", "Drink me!", icon = icon("cocktail")))
+```
+
+## Exercises 
+
+1. When space is at a premium, its useful to label text boxes using a placeholder that appears inside the text entry area. 
+
+```{r}
+textInput("entry", placeholder = "Your Name")
+```
+
+2. 
+
+```{r}
+sliderInput("name", "When should we deliver?", timeFormat = "%F")
+```
+
+3. 
+
+We create subheadings by breaking the choices into groups
+
+```{r}
+selectInput("state", "Choose a state:",
+            list(`East Coast` = list("NY", "NJ", "CT"),
+                 `West Coast` = list("WA", "OR", "CA"),
+                 `Midwest` = list("MN", "WI", "IA")))
+```
+
+4. 
+
+```{r}
+sliderInput("name", "Label", min = 0, max = 100, value = 50, step = 5,
+            animate = TRUE)
+```
+
+5. The step parameter changes how the values move upwards and downwards when the side arrow keys are clicked. 
+
+# Outputs
+
+Each output function on the front end is coupled with a render function in the back end. There are 3 main types of output, corresponding to the 3 things we usually include in a report:
+
+1. text 
+2. tables 
+3. plots 
+
+## Text 
+
+Output regular text with textOutput() and fixed code and console output with verbatimTextOutput()
+
+```{r}
+ui <- fluidPage(
+    textOutput("text"),
+    verbatimTextOutput("code")
+)
+
+server <- function(input, output, session) {
+    output$text <- renderText({
+        "Hello, friend!"
+    })
+
+    output$code <- renderPrint({
+        summary(1:10)
+    })
+}
+
+shinyApp(ui, server)
+```
+
+The parenthesis are only needed when we wish to run multiple lines of code. If we have a one liner (like above), we could omit them. 
+
+There are two render functions that can be used with either of the text output functions:
+
+1. renderText() displays text returned by the code 
+2. renderPrint() displays text printed by the code 
+
+```{r}
+print_and_return <- function() {
+    print("a")
+    print("b")
+    "c"
+}
+
+x <- print_and_return()
+x
+```
+
+## Tables 
+
