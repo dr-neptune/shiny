@@ -116,3 +116,101 @@ server <- function(input, output, session) {
 
 shinyApp(ui, server)
 ```
+
+3. 
+
+```{r}
+ui <- fluidPage(
+    sliderInput("x", "if x is", 1, 50, 30, 1),
+    sliderInput("y", "and y is", 1, 50, 30, 1),
+    textOutput("by_five")
+)
+
+server <- function(input, output, session) {
+    output$by_five <- renderText({
+        paste0("\nthen x multiplied by y is: ", input$x * input$y)))
+}
+
+shinyApp(ui, server)
+```
+
+4. 
+
+```{r}
+ui <- fluidPage(
+    sliderInput("x", "if x is", 1, 50, 30, 1),
+    sliderInput("y", "and y is", 1, 50, 5, 1),
+    "then, (x * y) is", textOutput("product"),
+    "and, (x * y) + 5 is", textOutput("product_plus5"),
+    "and, (x * y) + 10 is", textOutput("product_plus10"),
+)
+
+server <- function(input, output, session) {
+    output$product <- renderText({
+        (product <- input$x * input$y)
+    })
+
+    output$product_plus5 <- renderText({
+        (product <- input$x * input$y + 5)
+    })
+
+    output$product_plus10 <- renderText({
+        (product <- input$x * input$y + 10)
+    })
+}
+
+shinyApp(ui, server)
+```
+
+Then reduce using reactive 
+
+```{r}
+ui <- fluidPage(
+    sliderInput("x", "if x is", 1, 50, 30, 1),
+    sliderInput("y", "and y is", 1, 50, 5, 1),
+    "then, (x * y) is", textOutput("product"),
+    "and, (x * y) + 5 is", textOutput("product_plus5"),
+    "and, (x * y) + 10 is", textOutput("product_plus10"),
+)
+
+server <- function(input, output, session) {
+    product <- reactive({
+        input$x * input$y
+    })
+
+    output$product <- renderText({product()})
+    output$product_plus5 <- renderText({product() + 5})
+    output$product_plus10 <- renderText({product() + 10})
+}
+
+shinyApp(ui, server)
+```
+
+5. 
+
+```{r}
+datasets <- data(package = "ggplot2")$results[, "Item"]
+
+ui <- fluidPage(
+    selectInput("dataset", "Dataset", choices = datasets),
+    verbatimTextOutput("summary"),
+    plotOutput("plot", 500, 500)
+)
+
+server <- function(input, output, session) {
+    dataset <- reactive({
+        get(input$dataset, "package:ggplot2")
+    })
+
+    output$summary <- renderPrint({
+        dataset() %>% summary()
+    })
+
+    output$plot <- renderPlot({
+        plot(dataset()[, 1:2])
+    })
+}
+
+shinyApp(ui, server)
+```
+
