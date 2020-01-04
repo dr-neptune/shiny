@@ -268,3 +268,227 @@ server <- function(input, output, session) {
  
 shinyApp(ui, server)
 ```
+
+3. 
+
+```{r}
+ui <- fluidPage(
+    dataTableOutput("table")
+)
+
+server <- function(input, output, session) {
+    output$table <- renderDataTable(mtcars, options = list(pageLength = 5,
+                                                           searching = FALSE,
+                                                           ordering = FALSE))
+}
+
+shinyApp(ui, server)
+```
+
+# Layouts
+
+Here we will focus on the fluidPage function and defer the other layout families like dashboards and dialog boxes to another chapter. 
+
+## Overview 
+
+Layouts are formed by a nested hierarchy of function calls. Here is an example
+
+```{r}
+fluidPage(
+    titlePanel(
+        sidebarLayout(
+            sidebarPanel(
+                sliderInput("obs", "Observations:", 0, 1000, 500)
+            ),
+            mainPanel(
+                plotOutput("distPlot")))))
+```
+
+## Page with Sidebar 
+
+This makes a two column layout with inputs on the left and outputs on the right. 
+
+```{r}
+fluidPage(
+    titlePanel(
+        # app title / description
+    ),
+    sidebarLayout(
+        sidebarPanel(
+            # inputs 
+        ),
+        mainPanel(
+            #outputs
+        )))
+```
+
+
+#+DOWNLOADED: /tmp/screenshot.png @ 2020-01-04 13:53:06
+[[file:screenshot_2020-01-04_13-53-06.png]]
+
+As an example, here is an app that demonstrates the central limit theorem. 
+
+```{r}
+ui <- fluidPage(
+    headerPanel("Central Limit Theorem"),
+    sidebarLayout(
+        sidebarPanel(
+            numericInput("m", "Number of Samples:", 2, min = 1, max = 100)),
+        mainPanel(
+            plotOutput("hist"))))
+
+server <- function(input, output, session) {
+    output$hist <- renderPlot({
+        means <- replicate(1e4, mean(runif(input$m)))
+        hist(means, breaks = 20)})}
+
+shinyApp(ui, server)
+```
+
+## Multi Row 
+
+```{r}
+fluidPage(
+    fluidRow(
+        column(4, ...),
+        column(8, ...)),
+    fluidRow(
+        column(6, ...),
+        column(6, ...)))
+```
+
+This generates the structure below 
+
+
+#+DOWNLOADED: /tmp/screenshot.png @ 2020-01-04 13:55:22
+[[file:screenshot_2020-01-04_13-55-22.png]]
+
+The first argument to column is the width, and the width of each row must add up to 12. 
+
+## Themes 
+
+```{r}
+theme_demo <- function(theme) {
+    fluidPage(
+        theme = shinythemes::shinytheme(theme),
+        sidebarLayout(
+            sidebarPanel(
+                textInput("txt", "Text Input:", "text here"),
+                sliderInput("slider", "Slider Input:", 1, 100, 50)),
+            mainPanel(
+                h1("Header 1"),
+                h2("Header 2"),
+                p("Some Text"))))}
+
+ui <- theme_demo("darkly")
+ui <- theme_demo("flatly")
+ui <- theme_demo("sandstone")
+ui <- theme_demo("united")
+
+shinyApp(ui, server)
+```
+
+To see all the available themes within the shinythemes package, here is the theme selector app written by Winston Chang
+
+```{r}
+ui <- tagList(
+    shinythemes::themeSelector(),
+    navbarPage("shinythemes",
+               tabPanel("Nav Bar 1",
+                        sidebarPanel(
+                            fileInput("file", "File Input:"),
+                            textInput("txt", "Text Input:", "general"),
+                            sliderInput("slider", "Slider Input:", 1, 100, 30),
+                            tags$h5("Default Action Button:"),
+                            actionButton("action", "Action Button"),
+                            tags$h5("Action Button with CSS Class:"),
+                            actionButton("action2", "Action Button",
+                                         class = "btn-primary")),
+                        mainPanel(
+                            tabsetPanel(
+                                tabPanel("Tab 1",
+                                         h4("Table"),
+                                         tableOutput("table"),
+                                         h4("Verbatim Text Output"),
+                                         verbatimTextOutput("txtout"),
+                                         h1("Header 1"),
+                                         h2("Header 2"),
+                                         h3("Header 3"),
+                                         h4("Header 4"),
+                                         h5("Header 5")),
+                                tabPanel("Tab 2",
+                                         "This panel left blank"),
+                                tabPanel("Tab 3",
+                                         "This panel left blank")))),
+               tabPanel("Nav Bar 2",
+                        "This panel left blank"),
+               tabPanel("Nav Bar 3",
+                        "This panel left blank")))
+
+server <- function(input, output, session) {
+    output$txtout <- renderText({
+        paste(input$txt,
+              input$slider,
+              format(input$date),
+              sep = ",")})
+
+    output$table <- renderTable(head(cars, 5))
+}
+
+shinyApp(ui, server)
+```
+
+## Exercises 
+
+1. 
+
+```{r}
+ui <- fluidPage(
+    headerPanel("Central Limit Theorem"),
+    sidebarLayout(
+        sidebarPanel(
+            numericInput("m", "Number of Samples:", 2, min = 1, max = 100)),
+        mainPanel(
+            plotOutput("hist")),
+        position = "right"))
+
+server <- function(input, output, session) {
+    output$hist <- renderPlot({
+        means <- replicate(1e4, mean(runif(input$m)))
+        hist(means, breaks = 20)})}
+
+shinyApp(ui, server)
+```
+
+2. 
+
+```{r}
+ui <- fluidPage(
+    theme = shinythemes::shinytheme("darkly"),
+    headerPanel("Central Limit Theorem"),
+    sidebarLayout(
+        sidebarPanel(
+            numericInput("m", "Number of Samples:", 2, min = 1, max = 100)),
+        mainPanel(
+            plotOutput("hist")),
+        position = "right"))
+
+server <- function(input, output, session) {
+    output$hist <- renderPlot({
+        means <- replicate(1e4, mean(runif(input$m)))
+        hist(means, breaks = 20)})}
+
+shinyApp(ui, server)
+```
+
+# Under the Hood
+
+All input, output, and layout functions in shiny return html. We can see this by running ui functions directly in the console. 
+
+```{r}
+fluidPage(
+    textInput("name", "What's your name?"))
+```
+
+Shiny is also flexible in that it allows us to use html tags directly to achieve more customization.
+
