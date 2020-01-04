@@ -193,3 +193,78 @@ x
 
 ## Tables 
 
+- tableOutput and renderTable render a static table of data, showing all the data at once. This is useful for small, fixed summaries
+
+- dataTableOutput and renderDataTable render a dynamc table, showing a fixed number of rows along with controls to change which rows are visible. This is most appropriate if we wish to expose a complete data frame. 
+
+```{r}
+ui <- fluidPage(
+    tableOutput("static"),
+    dataTableOutput("dynamic")
+)
+
+server <- function(input, output, session) {
+    output$static <- renderTable(head(mtcars))
+    output$dynamic <- renderDataTable(mtcars, options = list(pageLength = 5))
+}
+
+shinyApp(ui, server)
+```
+
+## Plots 
+
+```{r}
+ui <- fluidPage(
+    plotOutput("plot", width = "400px")
+)
+
+server <- function(input, output, session) {
+    output$plot <- renderPlot(plot(1:5))
+}
+
+shinyApp(ui, server)
+```
+
+By default, the plot will take up the full width of the container and will be 400 pixels high. 
+
+Plots are special because they are outputs that can also act as inputs. plotOutput has a number of arguments like click, dblclick, and hover. There are capabilities for handling user interaction with the plot in an interactive manner. 
+
+## Downloads 
+
+We can let the user download a file with downloadButton or downloadLink. These require more techniques than we have seen thus far. 
+
+## Exercises 
+
+1. 
+
+```{r}
+ui <- fluidPage(
+    plotOutput("plot", width = 700, height = 300)
+)
+
+server <- function(input, output, session) {
+    output$plot <- renderPlot(plot(1:5))
+}
+
+shinyApp(ui, server)
+```
+
+2. 
+
+```{r}
+ui <- fluidPage(
+    plotOutput("plot", width = "90%")
+)
+
+server <- function(input, output, session) {
+    require(patchwork)
+    plot1 <- reactive(ggplot(mtcars, aes(mpg, hp)) + geom_point())
+    plot2 <- reactive(ggplot(mtcars, aes(disp, wt)) + geom_line())
+    
+    output$plot <- renderPlot({
+        plot1() + plot2()
+    })
+}
+ 
+shinyApp(ui, server)
+```
