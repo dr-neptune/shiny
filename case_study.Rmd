@@ -1,0 +1,128 @@
+# Case Study 
+
+```{r}
+library(shiny)
+library(tidyverse)
+library(vroom)
+```
+
+## Data 
+
+```{r}
+# get data
+nice <- neiss::injuries %>%
+    filter(lubridate::year(trmt_date) == 2017)
+
+prods <- neiss::products
+
+popn <- neiss::population
+
+# write to csv
+list(nice, prods, popn) %>%
+    set_names(c("nice", "prods", "popn")) %>%
+    imap(., ~ write_csv(x = .x, path = paste0("neiss_", .y, ".csv")))
+
+# load with vroom
+nice <- vroom("neiss_nice.csv", delim = ",")
+prods <- vroom("neiss_prods.csv", delim = ",")
+popn <- vroom("neiss_popn.csv", delim = ",")
+```
+
+- trmt_date is the date the person was seen in the hospital 
+- age, sex, race give demographic information 
+- body_part is the location of the injury on the body
+- location is where the accident occurred 
+- diag gives the basic diagnosis of the injury 
+- prod_code is the primary product associated with the injury 
+- weight is the statistical weight given the estimated number of people who would suffer from this injury if the dataset was scaled to the entire population of the us 
+- narrative is a brief story about how the accident occurred 
+
+- products lets us look up the product name from the product code 
+- population tells us the total us population in that year for each combination of age and sex 
+
+## Exploration
+
+What is the product with the most injuries?
+
+```{r}
+nice %>%
+    group_by(prod1) %>%
+    tally(sort = TRUE) %>%
+    mutate(propn = round(n / sum(n), 2))
+
+(nice %>%
+    filter(prod1 == 1842) %>%
+    left_join(prods, by = c("prod1" = "code")) %>%
+    select(title, everything()) -> selected)
+```
+
+stairs or steps, with 8% by proportion. Following that up, also with 8%, is floors or flooring materials. 
+
+
+What are some basic summaries of diagnosis, body part and location weighted by the weight variable?
+
+```{r}
+weighted_count <- function(data, variable) {
+    require(rlang)
+
+    data %>%
+        count(eval(parse_expr(variable)), wt = weight, sort = TRUE)
+}
+
+
+c("diag", "body_part", "location") %>%
+    map(., ~ weighted_count(selected, .x)) %>%
+    set_names(c("diag", "body_part", "location"))
+```
+
+
+steps injuries most commonly are associated with strain or sprains of the ankle and often happen at home. 
+
+```{r}
+selected %>%
+    group_by(age, sex) %>%
+    tally(sort = TRUE, wt = weight) %>%
+    ggplot(aes(age, n, color = sex)) +
+    geom_line() +
+    labs(y = "Estimated Number of Injuries")
+```
+
+We see a big spike when children are learning to walk, a drop off and then a reduction after 50. Women tend to have more steps related injuries. This might be due to high heeled shoes
+
+One problem with interpreting this pattern is that we know that there are fewer older people than younger people. We can control for this by comparing the number of people injured with the total population and calculating an injury rate. 
+
+```{r}
+selected %>%
+    count(age, sex, wt = weight) %>%
+    left_join(popn, by = c("age", "sex")) %>%
+    mutate(rate = n / population * 1e4)
+
+selected %>%
+    group_by(age, sex) %>%
+    tally(sort = TRUE) %>%
+    mutate(sex = tolower(sex)) %>% 
+    left_join(popn %>%
+              filter(year == 2017) %>%
+              select("population" = n, everything()),
+              by = c("age", "sex")) %>%
+    mutate(rate = (n / population) * 1e5) %>%
+    ggplot(aes(age, rate, color = sex)) +
+    geom_line() +
+    labs(y = "Estimated Number of Injuries per 10,000 People")
+```
+
+Now we can look at some narratives
+
+```{r}
+selected %>%
+    sample_n(10) %>%
+    pull(narrative)
+```
+
+Having done this analysis for one product, we would like to easily do it for other products. This is a good use case for a shiny app
+
+# Prototype 
+
+When building a complex app, it is recommended to start as simply as possible to confirm the basic mechanics work before doing something more complicated.
+
+
