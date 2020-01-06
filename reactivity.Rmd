@@ -356,3 +356,170 @@ server <- function(input, output, session) {
 
 shinyApp(ui, server)
 ```
+
+## The Reactive Graph 
+
+Currently our reactive graph looks something like this:
+
+#+DOWNLOADED: /tmp/screenshot.png @ 2020-01-05 17:46:52
+[[file:screenshot_2020-01-05_17-46-52.png]]
+
+This is problematic:
+
+- The app is hard to understand because there are so many connections. There are no pieces that can be analyzed in isolation.
+- The app is inefficient because it does more work than necessary. For example, if we change the breaks of the plot then the data is recalculated. If you change n1, then x2 is updated in two places 
+- The histogram and the t test use separate random draws. This is misleading, as we would expect them to have the same underlying data. 
+
+## Simplifying the Graph 
+
+```{r}
+server <- function(input, output, session) {
+    x1 <- reactive(rnorm(input$n1, input$mean1, input$sd1))
+    x2 <- reactive(rnorm(input$n2, input$mean2, input$sd2))
+
+    output$hist <- renderPlot({
+        histogram(x1(), x2(),
+                  binwidth = input$binwidth,
+                  xlim = input$range)})
+
+    output$ttest <- renderText({
+        t_test(x1(), x2())})}
+```
+
+This transformation yields the simpler graph below:
+
+#+DOWNLOADED: /tmp/screenshot.png @ 2020-01-05 17:58:45
+[[file:screenshot_2020-01-05_17-58-45.png]]
+
+As opposed to the usual rule of 3, in shiny we should consider the rule of 1 since repeating any code can have efficiency drawbacks.
+
+## Why use reactive expressions?
+
+If we were to just use a variable, it would throw an error since our variable is outside of a reactive context. 
+
+If we use a function, it would be rerunning the computation every time a value changes. 
+
+If we use a reactive expression, then it only runs the computation once, then caches it and waits until something has changed. 
+
+# Controlling Timing of Evaluation 
+
+```{r}
+
+ui <- fluidPage(
+    fluidRow(
+        column(3,
+               numericInput("lambda1", "Lambda 1", value = 3),
+               numericInput("lambda2", "Lambda 2", value = 3),
+               numericInput("n", "n", value = 1e4, min = 0)),
+        column(9, plotOutput("hist"))))
+
+server <- function(input, output, session) {
+    x1 <- reactive(rpois(n = input$n, lambda = input$lambda1))
+    x2 <- reactive(rpois(n = input$n, lambda = input$lambda2))
+
+    output$hist <- renderPlot({
+        histogram(x1(), x2(),
+                  binwidth = 1, xlim = c(0, 40))})}
+
+shinyApp(ui, server)
+```
+
+
+#+DOWNLOADED: /tmp/screenshot.png @ 2020-01-05 21:32:32
+[[file:screenshot_2020-01-05_21-32-32.png]]
+
+
+
+Now that we are familiar with the basic ideas of reactivity, we will discuss two more advanced techniques which will allow us to either increase or decrease how often a reactive expression is executed. 
+
+## Timed Invalidation 
+
+Suppose we wish to enforce the fact that this is for simulated data by constantly resimulating the data and showing an animation rather than a static plot. We can increase the frequency of updates with a new function, reactiveTimer(). This takes a hidden input, the time and causes the graph to invalidate itself more often than it otherwise would.
+
+```{r}
+server <- function(input, output, session) {
+    # update every 500 ms
+    timer <- reactiveTimer(500)
+
+    x1 <- reactive({
+        timer()
+        rpois(input$n, input$lambda1)})
+
+    x2 <- reactive({
+        timer()
+        rpois(input$n, input$lambda2)})
+
+    output$hist <- renderPlot({
+        histogram(x1(), x2(), binwidth = 1, xlim = c(0, 40))})}
+
+shinyApp(ui, server)
+```
+
+
+#+DOWNLOADED: /tmp/screenshot.png @ 2020-01-05 21:40:20
+[[file:screenshot_2020-01-05_21-40-20.png]]
+
+## On Click
+
+We can also run the simulation with a click of a button. 
+
+```{r}
+ui <- fluidPage(
+    fluidRow(
+        column(3,
+               numericInput("lambda1", "Lambda 1", value = 3),
+               numericInput("lambda2", "Lambda 2", value = 3),
+               numericInput("n", "n", value = 1e4, min = 0),
+               actionButton("simulate", "Simulate!")),
+        column(9, plotOutput("hist"))))
+```
+
+To use the action button properly we need to learn a new tool. If we just use the simulate button in the same way we did the timer above, we end up with an efficiency issue. x1 and x2 will update when we click the simulate button, but they will also continue to update when lambda1, lambda2, or n update. We wish to replace the dependencies, not to add to them. 
+
+To solve this, we will use a new tool. eventReactive gives us a way to use input values without taking a reactive dependency on them. The first two arguments of event reactive specify what to take a dependency on, and what to compute. 
+
+```{r}
+server <- function(input, output, session) {
+    x1 <- eventReactive(input$simulate,
+                        rpois(input$n, input$lambda1))
+
+    x2 <- eventReactive(input$simulate,
+                        rpois(input$n, input$lambda2))
+
+    output$hist <- renderPlot({
+        histogram(x1(), x2(), binwidth = 1, xlim = c(0, 40))})}
+```
+
+Here is the new reactive graph. The dashed lines mean that x1 and x2 continue to use the values, but no longer take a reactive dependency on them. 
+
+
+#+DOWNLOADED: /tmp/screenshot.png @ 2020-01-05 22:02:08
+[[file:screenshot_2020-01-05_22-02-08.png]]
+
+## Observers 
+
+Sometimes we need to reach outside of an app and cause side effects to happen elsewhere. This is commonly done in cases like saving a file to a network drive, sending data to a web api, updating a database, or printing a debugging message to the console. Since these don't affect the look of the app, we can't use an output and a render function. Instead we must use an observer.
+
+observeEvent is very similar to eventReactive. It has two important arguments: eventExpr and handlerExpr. The first argument is the input or expression to take a dependency on. The second argument is the code that will be run. 
+
+For example, in the server function below every time that name is updated, a message will be sent to the console. 
+
+```{r}
+server <- function(input, output, session) {
+    text <- reactive(paste0("Hello ", input$name, "!"))
+
+    output$greeting <- renderText(text())
+    observeEvent(input$name, message("Greeting Performed"))}
+```
+
+There are two important differences between observeEvent and eventReactive:
+
+- You don't assign observeEvent to a variable 
+- You can't refer to it from other reactive consumers 
+
+Observers and outputs are closely related. We can think of outputs as having a special side effect: updating the html in the users browser. To emphasize this closeness, we will draw them in the reactive graph the same way.
+
+
+#+DOWNLOADED: /tmp/screenshot.png @ 2020-01-05 22:14:45
+[[file:screenshot_2020-01-05_22-14-45.png]]
+
