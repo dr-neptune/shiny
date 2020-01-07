@@ -92,20 +92,29 @@ We see a big spike when children are learning to walk, a drop off and then a red
 One problem with interpreting this pattern is that we know that there are fewer older people than younger people. We can control for this by comparing the number of people injured with the total population and calculating an injury rate. 
 
 ```{r}
-selected %>%
-    count(age, sex, wt = weight) %>%
-    left_join(popn, by = c("age", "sex")) %>%
-    mutate(rate = n / population * 1e4)
 
 selected %>%
     group_by(age, sex) %>%
     tally(sort = TRUE) %>%
-    mutate(sex = tolower(sex)) %>% 
+    mutate(sex = tolower(sex)) %>%
     left_join(popn %>%
               filter(year == 2017) %>%
               select("population" = n, everything()),
               by = c("age", "sex")) %>%
-    mutate(rate = (n / population) * 1e5) %>%
+    mutate(rate = (n / population) * 1e5) -> summary
+
+nice %>%
+    filter(prod1 == 1207) %>%
+    mutate(sex = tolower(sex)) %>%
+    group_by(age, sex) %>%
+    tally(sort = TRUE) %>%
+    left_join(popn %>%
+              filter(year == 2017) %>%
+              select("population" = n, everything()),
+              by = c("age", "sex")) %>%
+    mutate(rate = (n / population) * 1e5)
+
+summary %>%
     ggplot(aes(age, rate, color = sex)) +
     geom_line() +
     labs(y = "Estimated Number of Injuries per 10,000 People")
@@ -125,4 +134,241 @@ Having done this analysis for one product, we would like to easily do it for oth
 
 When building a complex app, it is recommended to start as simply as possible to confirm the basic mechanics work before doing something more complicated.
 
+Here is a beginner design with one row for inputs, one row for all three tables, and one row for the plot
 
+```{r}
+
+ui <- fluidPage(
+    fluidRow(
+        column(6,
+               selectInput("code", "Product",
+                           setNames(prods$code, prods$title)))),
+    fluidRow(
+        column(4, tableOutput("diag")),
+        column(4, tableOutput("body_part")),
+        column(4, tableOutput("location"))),
+    fluidRow(
+        column(12, plotOutput("age_sex"))))
+
+```
+
+The server function is straight forward. First we convert the selected and summary variables to reactive expressions. 
+
+```{r}
+server <- function(input, output, session) {
+    
+    selected <- reactive(nice %>% filter(prod1 == input$code))
+
+    output$diag <- renderTable(
+        selected() %>% count(diag, wt = weight, sort = TRUE)
+    )
+    output$body_part <- renderTable(
+        selected() %>% count(body_part, wt = weight, sort = TRUE)
+    )
+    output$location <- renderTable(
+        selected() %>% count(location, wt = weight, sort = TRUE))
+
+    summary <- reactive({
+        selected() %>%
+            mutate(sex = tolower(sex)) %>%
+            group_by(age, sex) %>%
+            tally(sort = TRUE) %>%
+            left_join(popn %>%
+                      filter(year == 2017) %>%
+                      select("population" = n, everything()),
+                      by = c("age", "sex")) %>%
+            mutate(rate = (n / population) * 1e5)
+    })
+
+    output$age_sex <- renderPlot({
+        summary() %>%
+            ggplot(aes(age, n, color = sex)) +
+            geom_line() +
+            labs(y = "Estimated Number of Injuries") +
+            theme_grey(15)})}
+
+shinyApp(ui, server)
+```
+
+## Polish Tables 
+
+The first problem with the app is that it shows a lot of information in the tables, where we probably just want highlights.
+
+We can turn the variables into factors, order by frequency, and lump together the leftovers after the top 5.
+
+```{r}
+count_top <- function(df, var, n = 5) {
+    df %>%
+        mutate({{var}} := fct_lump(fct_infreq({{var}}), n = n)) %>%
+        group_by({{var}}) %>%
+        summarize(n = as.integer(sum(weight)))
+}
+```
+
+Now we can update the server function 
+
+```{r}
+server <- function(input, output, session) {
+       selected <- reactive(nice %>% filter(prod1 == input$code))
+
+       output$diag <- renderTable(count_top(selected(), diag), width = "100%")
+       output$body_part <- renderTable(count_top(selected(), body_part), width = "100%")
+       output$location <- renderTable(count_top(selected(), location), width = "100%")
+
+       summary <- reactive({
+           selected() %>%
+               mutate(sex = tolower(sex)) %>%
+               group_by(age, sex) %>%
+               tally(sort = TRUE) %>%
+               left_join(popn %>%
+                         filter(year == 2017) %>%
+                         select("population" = n, everything()),
+                         by = c("age", "sex")) %>%
+               mutate(rate = (n / population) * 1e4)})
+
+       output$age_sex <- renderPlot({
+           summary() %>%
+               ggplot(aes(age, n, color = sex)) +
+               geom_line() +
+               labs(y = "Estimated Number of Injuries") +
+               theme_grey(15)})
+}
+
+shinyApp(ui, server)
+```
+
+## Rate vs Count
+
+We wish to give users the choice between visualizing the number of injuries or the population standardized rate.
+
+First we add a control to the UI:
+
+```{r}
+
+ui <- fluidPage(
+    fluidRow(
+        column(6,
+               selectInput("code", "Product",
+                           setNames(prods$code, prods$title),
+                           width = "100%")),
+        column(2, selectInput("y", "Y axis", c("rate", "count")))),
+    fluidRow(
+        column(4, tableOutput("diag")),
+        column(4, tableOutput("body_part")),
+        column(4, tableOutput("location"))),
+    fluidRow(
+        column(12, plotOutput("age_sex"))))
+
+```
+
+Then we condition on that input when generating the plot 
+
+```{r}
+
+server <- function(input, output, session) {
+       selected <- reactive(nice %>% filter(prod1 == input$code))
+
+       output$diag <- renderTable(count_top(selected(), diag), width = "100%")
+       output$body_part <- renderTable(count_top(selected(), body_part), width = "100%")
+       output$location <- renderTable(count_top(selected(), location), width = "100%")
+
+       summary <- reactive({
+           selected() %>%
+               mutate(sex = tolower(sex)) %>%
+               group_by(age, sex) %>%
+               tally(sort = TRUE) %>%
+               left_join(popn %>%
+                         filter(year == 2017) %>%
+                         select("population" = n, everything()),
+                         by = c("age", "sex")) %>%
+               mutate(rate = (n / population) * 1e5)})
+
+       output$age_sex <- renderPlot({
+           if (input$y == "count") {
+               summary() %>%
+                   ggplot(aes(age, n, color = sex)) +
+                   geom_line() +
+                   labs(y = "Estimated Number of Injuries") +
+                   theme_grey(15)
+           } else {
+               summary() %>%
+                   ggplot(aes(age, rate, color = sex)) +
+                   geom_line() +
+                   labs(y = "Estimated Number of Injuries per 10,000 People") +
+                   theme_grey(15)}})}
+
+shinyApp(ui, server)
+```
+
+
+## Narrative
+
+We wish to add some of the narratives because they give perspective to the plots and tables.
+
+First we want to add a new row to the bottom of the UI. Then we can add an action button to trigger a new story, and put the narrative in a textOutput
+
+```{r}
+ui <- fluidPage(
+    fluidRow(
+        column(6,
+               selectInput("code", "Product",
+                           setNames(prods$code, prods$title),
+                           width = "100%")),
+        column(2, selectInput("y", "Y axis", c("rate", "count")))),
+    fluidRow(
+        column(4, tableOutput("diag")),
+        column(4, tableOutput("body_part")),
+        column(4, tableOutput("location"))),
+    fluidRow(
+        column(12, plotlyOutput("age_sex"))),
+    fluidRow(
+        column(2, actionButton("story", "Tell Me a Story")),
+        column(10, textOutput("narrative"))))
+```
+
+The result of an action button is an integer that increments each time it is clicked. Here we use it to trigger a re-execution of the random selection.
+
+```{r}
+server <- function(input, output, session) {
+       selected <- reactive(nice %>% filter(prod1 == input$code))
+
+       output$diag <- renderTable(count_top(selected(), diag), width = "100%")
+       output$body_part <- renderTable(count_top(selected(), body_part), width = "100%")
+       output$location <- renderTable(count_top(selected(), location), width = "100%")
+
+       summary <- reactive({
+           selected() %>%
+               mutate(sex = tolower(sex)) %>%
+               group_by(age, sex) %>%
+               tally(sort = TRUE) %>%
+               left_join(popn %>%
+                         filter(year == 2017) %>%
+                         select("population" = n, everything()),
+                         by = c("age", "sex")) %>%
+               mutate(rate = (n / population) * 1e5)})
+
+       output$age_sex <- renderPlotly({
+           if (input$y == "count") {
+               summary() %>%
+                   ggplot(aes(age, n, color = sex)) +
+                   geom_line() +
+                   labs(y = "Estimated Number of Injuries") +
+                   theme_grey(15) -> p1 
+                   p1 %>% plotly::ggplotly()
+           } else {
+               summary() %>%
+                   ggplot(aes(age, rate, color = sex)) +
+                   geom_line() +
+                   labs(y = "Estimated Number of Injuries per 10,000 People") +
+                   theme_grey(15) -> p1
+                   p1 %>% plotly::ggplotly()}})
+
+       output$narrative <- renderText({
+           input$story
+           selected() %>%
+               pull(narrative) %>%
+               sample(1)})
+}
+
+shinyApp(ui, server)
+```
