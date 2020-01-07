@@ -1,0 +1,448 @@
+# User Feedback 
+
+```{r}
+library(tidyverse)
+library(shiny)
+library(magrittr)
+```
+
+We will start with techniques for: 
+
+- **validation** : informe the user when an input, or combination of inputs, is in an invalid state 
+- **notification** : send general messages to the user 
+- **progress bars** : give the details for time consuming operations 
+- **confirmation dialogs** : the ability to undo an action 
+
+We will also use shinyFeedback and waiter
+
+```{r}
+library(shinyFeedback)
+library(waiter)
+```
+
+# Validation 
+
+The first and most important feedback you can give a user is that they've given bad input.
+
+## Validating Input 
+
+If you want to give feedback to the user, a good way to do so is with the shinyFeedback package.
+
+First you add useShinyFeedback() to the ui
+
+```{r}
+ui <- fluidPage(
+    useShinyFeedback(),
+    numericInput("n", "n", value = 10),
+    textOutput("half"))
+```
+
+Then call one of the feedback functions in your server function. There are four variants:
+
+- feedback()
+- feedbackWarning()
+- feedbackDanger()
+- feedbackSuccess()
+
+They all have 3 key arguments:
+
+- inputId : The id of the input where the feedback should take place 
+- show : a logical determing whether or not to show the feedback 
+- text : the text to display 
+
+Suppose we wish to display a warning message for odd numbers:
+
+```{r}
+server <- function(input, output, session) {
+    observeEvent(input$n,
+                 feedbackWarning("n",
+                                 input$n %% 2 != 0,
+                                 "please select an even number",
+                                 color = "blue"))
+
+    output$half <- renderText(input$n / 2)
+}
+```
+
+Notice that while the error is displayed, the output is still updated. Typically we don't want to do that since it can cause uninformative R errors which we don't want to show to the user. 
+
+To fix this problem, we need a new tool: req()
+
+```{r}
+server <- function(input, output, session) {
+    half <- reactive({
+        even <- input$n %% 2 == 0
+        feedbackWarning("n", !even,
+                        "Please select an even number")
+        req(even)
+        input$n / 2})
+
+    output$half <- renderText(half())
+}
+```
+
+When the input to req is not true, it sends a special signal to shiny that the reactive graph does not have all the inputs that it requires, so it is paused. This means that any reactive consumers that follow in the reactive graph will not be updated. 
+
+### Pausing Execution with req()
+
+When you start a shiny app, the entire reactive graph is computed even before a user does anything. Sometimes we may with to wait until a user actually does something. 
+
+This need tends to crop up mainly with three controls:
+
+- In textInput(), if you've used value="" and don't want to do anything until the user types something 
+- In inputSelect(), if you've provided an empty choice "" and you don't want to do anything until the user makes a selection 
+- In fileInput(), which has an empty result before the user has uploaded anything. 
+
+The job of req() is to pause reactives so that nothing happens until some condition is true. 
+
+Consider the following app which generates an error:
+
+```{r}
+ui <- fluidPage(
+    selectInput("language", "Language", choices = c("", "English", "Maori")),
+    textInput("name", "Name"),
+    textOutput("greeting"))
+
+server <- function(input, output, session) {
+    greetings <- c(English = "Hello", Maori = "Ki ora")
+
+    output$greeting <- renderText({
+        paste0(greetings[[input$language]], " ", input$name, "!")})}
+
+go()
+```
+
+When the app loads, it displays an uninformative error until you select a language that isn't blank. We can fix this problem with req()
+
+```{r}
+server <- function(input, output, session) {
+    greetings <- c(English = "Hello", Maori = "Ki ora")
+
+    output$greeting <- renderText({
+        req(input$language, input$name)
+        paste0(greetings[[input$language]], " ", input$name, "!")})}
+
+go()
+```
+
+req() is designed so that req(input$x) will only proceed if the user has supplied a value, regardless of the type of the input control. We can also use req() with a logical statement if needed. For example, req(input$a > 0).
+
+## req and validation
+
+We will combine req() with shinyFeedback to solve a more challenging problem. This will use the app created in chapter 2 which shows the contents of simple datasets.
+
+```{r}
+ui <- fluidPage(
+    useShinyFeedback(),
+    textInput("dataset", "Dataset Name"),
+    tableOutput("data"))
+```
+
+The server function needs to get more complex. We will use req in the following ways:
+
+- We only want to proceed with the computation if the user has entered a value so we do req(input$dataset)
+- Check to see if the supplied name actually exists. If not, display an error message. Note the use of cancelOutput = TRUE
+
+```{r}
+server <- function(input, output, session) {
+    data <- reactive({
+        req(input$dataset)
+
+        exists <- exists(input$dataset, "package:datasets")
+        feedbackDanger("dataset", !exists, "Unknown Dataset")
+        req(exists, cancelOutput = TRUE)
+
+        get(input$dataset, "package:datasets")})
+
+    output$data <- renderTable({head(data())})}
+
+go()
+```
+
+## Validate Output 
+
+shinyFeedback works well when the problem is related to a single input -- but somethings outputs are related to many inputs in tandem. In this case it might make more sense to put the error beside an output. 
+
+We can do this with a tool built into shiny, validate(). When called inside a reactive or an output, validate(message) stops the execution of the rest of the code and instead displays message in any downstream outputs.
+
+
+
+The following shows a simple example where we don't want to log or square root negative values
+
+```{r}
+ui <- fluidPage(
+    numericInput("x", "x", value = 0),
+    selectInput("trans", "transformation", choices = c("square", "log", "square-root")),
+    textOutput("out"))
+
+server <- function(input, output, server) {
+    output$out <- renderText({
+        if (input$x < 0 &&
+            input$trans %in% c("log", "square-root")) {
+            validate("x can not be negative for this transformation")}
+
+        switch(input$trans,
+               square = input$x ^ 2,
+               "square-root" = sqrt(input$x),
+               log = log(input$x))})}
+
+go()
+```
+
+# Notifications 
+
+If there isn't a problem and just want to let the user know what is happening, you can use a **notification**.
+
+There are three basic ways to use showNotification():
+
+- To show a transient notification that automatically disappears after a fixed amount of time 
+- To show a notification when a process starts, and remove it when the process ends 
+- To update a single notification with progressive updates 
+
+## Transient Notification
+
+```{r}
+ui <- fluidPage(actionButton("goodnight", "Good Night"))
+
+server <- function(input, output, session) {
+    observeEvent(input$goodnight, {
+        showNotification("So Long")
+        Sys.sleep(1)
+        showNotification("Farewell")
+        Sys.sleep(1)
+        showNotification("Auf Wiedersehen")
+        Sys.sleep(1)
+        showNotification("Adieu")})}
+
+go()
+```
+
+By default the message will disappear after 5 seconds, which you can override by setting duration or the user can dismiss it earlier with the close button.
+
+```{r}
+server <- function(input, output, session) {
+    observeEvent(input$goodnight, {
+        showNotification("So Long")
+        Sys.sleep(1)
+        showNotification("Farewell", type = "message")
+        Sys.sleep(1)
+        showNotification("Auf Wiedersehen", type = "warning")
+        Sys.sleep(1)
+        showNotification("Adieu", type = "error")})}
+
+go()
+```
+
+
+## Removing on Completion
+
+Often we may want to tie the presence of a notification to a long running task. In this case we want to show a notification when it starts, and remove it when the task completes.
+
+To do this, we will need to 
+
+- set duration = null and closeButton = FALSE so that the notification stays visible until the task is complete
+- store id returned by showNotification and then pass this value to removeNotification to remove it when done. The most reliable way to do this is with on.exit()
+
+The following example shows how we might keep a user up to date when reading in a large csv file
+
+```{r}
+server <- function(input, output, session) {
+    data <- reactive({
+        id <- showNotification("Reading data...",
+                               duration = NULL,
+                               closeButton = FALSE)
+        on.exit(removeNotification(id), add = TRUE)
+
+        read.csv(input$path)})}
+```
+
+Generally these sorts of notifications will live in a reactive, because that ensures that the long running task is only rerun when absolutely needed.
+
+## Progressive Updates
+
+Instead of stacking multiple notifications, we can update a single notification by capturing the id from the first call and using it in subsequent calls. This is useful if our long running task has multiple subcomponents.
+
+```{r}
+ui <- fluidPage(tableOutput("data"))
+
+server <- function(input, output, session) {
+    notify <- function(msg, id = NULL) {showNotification(msg, id = id,
+                                                  duration = NULL,
+                                                  closeButton = FALSE)}
+
+    data <- reactive({
+        id <- notify("Reading Data...")
+        on.exit(removeNotification(id), add = TRUE)
+        Sys.sleep(1)
+
+        notify("Reticulating splines...", id = id)
+        Sys.sleep(1)
+
+        notify("Herding llamas...", id = id)
+        Sys.sleep(1)
+
+        notify("Orthogonalizing matrices...", id = id)
+        Sys.sleep(1)
+
+        mtcars})
+
+    output$data <- renderTable(head(data()))}
+
+go()
+```
+
+# Progress Bars
+
+We will use two techniques for showing progress bars: one built into shiny and one from the waiter package. There is a progress package being developed, but it is not (at the time of this writing) mature enough to use. There is a good chance that by the time this book comes out, it will use that package.
+
+```{r}
+# use Sys.sleep to simulate a long running operation
+
+ui <- fluidPage(
+    numericInput("steps", "How many steps?", 10),
+    actionButton("go", "go"),
+    textOutput("result"))
+
+server <- function(input, output, session) {
+    data <- reactive({
+        req(input$go)
+
+        progress <- Progress$new(max = input$steps)
+        on.exit(progress$close)
+
+        progress$set(message = "Computing Random Number")
+        for (i in seq_len(input$steps)) {
+            Sys.sleep(0.5)
+            progress$inc(1)}
+
+        runif(1)})
+
+    output$result <- renderText(round(data(), 2))}
+
+go()
+```
+
+## Waiter 
+
+waiter provides more visual options than the builtin progress bar.
+~~Unfortunately, it does not work currently. Both the code from the book and the code from the waiter page both fail to produce output.~~
+
+I defined a function named go and totally broke the output. Be careful with names! 
+
+```{r}
+ui <- fluidPage(
+  waiter::use_waitress(),
+  numericInput("steps", "How many steps?", 10),
+  actionButton("go", "go"),
+  textOutput("result")
+)
+
+server <- function(input, output, session) {
+  data <- reactive({
+    req(input$go)
+    waitress <- Waitress$new(max = input$steps)
+    on.exit(waitress$close())
+    
+    for (i in seq_len(input$steps)) {
+      Sys.sleep(0.5)
+      waitress$inc(1)
+    }
+    
+    runif(1)
+  })
+  
+  output$result <- renderText(round(data(), 2))
+}
+
+shinyApp(ui, server)
+```
+
+The default output is a thin progress bar at the top of the page. We can customize the output: 
+
+- We can override the default theme to use one of:
+  - overlay : an opaque progress bar that hides the whole page 
+  - overlay-opacity : a translucent progress bar that covers the whole page 
+  - overlay-percent : an opaque bar that also displays numeric percentage 
+  
+- Instead of show a progress bar for the entire page, we can overlay it on an existing input or output by setting the id parameter 
+
+```{r}
+ui <- fluidPage(
+    use_waitress(),
+    numericInput("steps", "How many steps?", 10),
+    actionButton("go", "go"),
+    textOutput("result"))
+
+server <- function(input, output, session) {
+    data <- reactive({
+        req(input$go)
+        waitress <- Waitress$new(id = "steps", theme = "overlay")
+        on.exit(waitress$close())
+
+        for (i in seq_len(input$steps)) {
+            Sys.sleep(0.5)
+            waitress$inc(1)
+        }
+
+        runif(1)
+    })
+
+    output$result <- renderText(round(data(), 2))
+}
+
+shinyApp(ui, server)
+```
+
+## Spinners
+
+These are useful for when you don't know how long an operation will take. In this case we just switch from using a Waitress to a Waiter: 
+
+```{r}
+ui <- fluidPage(
+  waiter::use_waiter(),
+  actionButton("go", "go"),
+  textOutput("result")
+)
+
+server <- function(input, output, session) {
+  data <- reactive({
+    req(input$go)
+    waiter <- Waiter$new()
+    waiter$show()
+    on.exit(waiter$hide())
+
+    Sys.sleep(sample(5, 1))
+    runif(1)})
+  
+  output$result <- renderText(round(data(), 2))
+}
+
+shinyApp(ui, server)
+```
+
+Like waitress, we can also use waiter for specific outputs. 
+
+```{r}
+ui <- fluidPage(
+  waiter::use_waiter(),
+  actionButton("go", "go"),
+  plotOutput("plot"),
+)
+
+server <- function(input, output, session) {
+  data <- reactive({
+    req(input$go)
+    waiter::Waiter$new(id = "plot")$show()
+    
+    Sys.sleep(3)
+    data.frame(x = runif(50), y = runif(50))
+  })
+  
+  output$plot <- renderPlot(plot(data()))
+}
+
+shinyApp(ui, server)
+```
+
+# Confirming and Undoing 
+

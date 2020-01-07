@@ -1,0 +1,28 @@
+# Workflow
+
+```{r}
+library(tidyverse)
+library(shiny)
+library(magrittr)
+
+go <- function() {
+    shinyApp(ui, server)
+}
+```
+
+# Development Workflow 
+
+The faster you can iterate, the faster you can experiment, and the faster you become a better developer.
+
+## Creating the App
+
+```{r}
+ui <- fluidPage()
+
+server <- function(input, output, session) {}
+
+shinyApp(ui, server)
+```
+
+// return another time 
+
