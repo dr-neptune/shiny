@@ -152,3 +152,140 @@ Note the use of validate() to only allow the user to download datasets that are 
 ## Downloading Reports 
 
 As well as downloading data, we may want users of the app to be able to download a report that summarizes the result of interactive exploration in the shiny app.
+
+One way to achieve this is with a parameterized rmarkdown document: 
+
+bookdown.org/yihui/markdown/parameterized-reports.html
+
+A parameterized rmd file has a params field in the YAML metadata:
+
+```{yaml}
+title: My Document 
+output: html_document 
+params:
+    year: 2020
+    region: Europe 
+    printcode: TRUE
+    data: file.csv
+```
+
+and inside the document we can refer to these values using params$year, params$region, etc. 
+
+The values in the YAML metadata are defaults -- they can be over-ridden by providing the params argument in a call to rmarkdown::render(). This makes it easy to generate many different reports from the same .Rmd
+
+```{r}
+ui <- fluidPage(
+    sliderInput("n", "Number of Points", 1, 100, 50),
+    downloadButton("report", "Generate Report"))
+
+server <- function(input, output, session) {
+    output$report <- downloadHandler(
+        filename = "report.html",
+        content = function(file) {
+            params <- list(n = input$n)
+            rmarkdown::render("report.Rmd",
+                              output_file = file,
+                              params = params,
+                              envir = new.env(parent = globalenv()))})}
+
+shinyApp(ui, server)
+```
+
+Some tricks worth noting:
+
+- If the report takes time to generate, use some of the techniques from ch 7 to let the user know 
+- In many deployment scenarios you won't be able to write to the working directory, which rmarkdown will attempt to do. A workaround is copying the report to a temp directory when the app starts 
+
+```{r}
+report_path <- tempfile(fileext = ".Rmd")
+file.copy("report.Rmd", report_path, overwrite = TRUE)
+```
+
+Then replace "report.Rmd" with report_path in the call to rmarkdown::render()
+
+- By default, rmarkdown will render the report in the current process which means that it will inherit settings from the shiny app like loaded packages and options. For greater robustness, its recommended to run render in a separate R session using callr:
+
+```{r}
+render_report <- function(input, outpout, params) {
+    rmarkdown::render(input,
+                      output_file = output,
+                      params = params,
+                      envir = new.env(parent = globalenv()))}
+
+server <- function(input, output, session) {
+    output$report <- downloadHandler(
+        filename = "report.html",
+        content = function(file) {
+            params <- list(n = input$slider)
+            callr::r(render_report,
+                     list(input = report_path, output = file, params = params))})}
+```
+
+
+# Case Study 
+
+Upload a file -> preview it -> perform transformations -> let user download
+
+### Uploading and Parsing
+
+```{r}
+ui_upload <- sidebarLayout(
+    sidebarPanel(
+        fileInput("file", "Data", buttonLabel = "Upload"),
+        textInput("delim", "Delimiter (leave blank to guess)", ""),
+        numericInput("skip", "Rows to Skip", 0, min = 0),
+        numericInput("rows", "Rows to Preview", 10, min = 1)),
+    mainPanel(
+        h3("Raw Data"),
+        tableOutput("preview1")))
+```
+
+### Cleaning the File
+
+```{r}
+ui_clean <- sidebarLayout(
+    sidebarPanel(
+        checkboxInput("snake", "Rename columns to snake_case?"),
+        checkboxInput("constant", "Remove constant columns?"),
+        checkboxInput("empty", "Remove empty columns?")),
+    mainPanel(
+        h3("Cleaner Data"),
+        tableOutput("preview2")))
+```
+
+### Downloading the File
+
+```{r}
+ui_download <- fluidRow(
+    column(width = 12, downloadButton("download", class = "btn-block")))
+```
+
+### Assemble 
+
+```{r}
+ui <- fluidPage(
+    ui_upload,
+    ui_clean,
+    ui_download
+)
+```
+
+### Server
+
+```{r}
+server <- function(input, output, session) {
+    # upload
+    raw <- reactive({
+        req(input$file)
+        delim <- if (input$delim == "") NULL else input$delim
+        vroom::vroom(input$file$datapath, delim = delim, skip = input$skip)})
+
+    output$preview1 <- renderTable(head(raw(), input$rows))
+
+    # clean
+    tidied <- reactive({
+        out <- raw()
+        if (input$snake) { names(out) <- janitor::make_clean_names(names(out)) }
+})
+}
+```

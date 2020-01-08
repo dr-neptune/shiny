@@ -1,0 +1,14 @@
+---
+title: "Dynamic Report"
+output: html_document
+params:
+    n: NA
+---
+
+```{r}
+params$n
+```
+
+```{r}
+plot(rnorm(params$n), rnorm(params$n))
+```
