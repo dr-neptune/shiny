@@ -1,0 +1,154 @@
+# Uploads and Downloads
+
+```{r}
+library(tidyverse)
+library(shiny)
+library(magrittr)
+```
+
+# Upload 
+
+## UI
+
+```{r}
+ui <- fluidPage(
+    fileInput("upload", "Upload a File",
+              multiple = TRUE,
+              accept = c("text/csv",
+                         "text/comma-separated-values,text/plain",
+                         ".csv"),
+              buttonLabel = "Input",
+              placeholder = "Upload a dataset"),
+    tableOutput("files"))
+```
+
+
+
+## Server
+
+Most inputs use simple vectors, but input$file returns a dataframe with 4 columns:
+
+- name : the original file name 
+- size : the file size in bytes. By default the user can only upload files up to 5 MB. This can be increased by setting options prior to starting shiny. For example, to allow up to 10MB run options(shiny.maxRequestSize = 10 * 1024^2)
+- type : the MIME type of the file. 
+- datapath : the path to where the data has been uploaded on the server. The data is always saved to a temporary directory and given a temporary name.
+
+```{r}
+server <- function(input, output, session) {
+    output$files <- renderTable(input$upload)}
+
+shinyApp(ui, server)
+```
+
+## Uploading Data
+
+If the user is uploading a dataset, there are three details to be aware of:
+
+- input$file is initialized to null on page load, so you will need req(input$file) to make sure your code waits until the first file is uploaded
+- The accept argument allows you to limit the possible inputs. This is only a suggestion to the browser and is not always enforced, so it is good practice to also validate it yourself
+
+Here is an app that allows the user to upload a csv file and see the first n rows
+
+```{r}
+library(DT)
+
+ui <- fluidPage(
+    fileInput("file", NULL, accept = c(".csv", ".tsv")),
+    numericInput("n", "Rows", value = 5, min = 1, step = 1),
+    dataTableOutput("head"))
+
+server <- function(input, output, session) {
+    data <- reactive({
+        req(input$file)
+
+        ext <- tools::file_ext(input$file$name)
+
+        switch(ext,
+               csv = vroom::vroom(input$file$datapath, delim = ","),
+               tsv = vroom::vroom(input$file$datapath, delim = "\t"),
+               validate("Invalid File; Please upload a .csv or .tsv file"))})
+
+    output$head <- renderDataTable(head(data(), input$n))
+}
+
+shinyApp(ui, server)
+```
+
+# Download 
+
+## Basics 
+
+You can customize the appearance of the download button by using the class argument with one of : 
+
+- "btn-primary"
+- "btn-success"
+- "btn-info"
+- "btn-warning"
+- "btn-danger"
+
+and the size with : 
+
+- "btn-lg"
+- "btn-sm"
+- "btn-xs"
+
+or space the entire width of the element with : 
+
+- "btn-block"
+
+```{r}
+ui <- fluidPage(
+    downloadButton("download1", class = "btn-success"),
+    downloadLink("download2"))
+```
+
+Unlike other outputs, downloadButton is not paired with a render function - instead you use downloadHandler which looks something like this:
+
+```{r}
+output$download <- downloadHandler(
+    filename = function() {paste0(input$dataset, ".csv")},
+    content = function(file) {write.csv(data(), file)}
+)
+```
+
+downloadHandler has two arguments, both functions:
+
+- filename should be a function with no args that returns a file name as a string. This is used to create the name that will be shown to the user in the download dialog box
+- content should be a function with one argument, file, which is the path to save the file. This is used to save the file in a place that shiny knows about so it can be sent to the user.
+
+## Downloading Data
+
+The following app shows off the basics of data download by allowing you to download any dataset in the datasets package as a TSV file. 
+
+```{r}
+library(vroom)
+
+ui <- fluidPage(
+    selectInput("dataset", "Pick a dataset", ls("package:datasets")),
+    dataTableOutput("preview"),
+    downloadButton("download", "Download .tsv"))
+
+server <- function(input, output, session) {
+    data <- reactive({
+        out <- get(input$dataset, "package:datasets")
+
+        if (!is.data.frame(out)) {
+            validate(paste0("'", input$dataset, "' is not a data frame"))
+        }
+
+        out})
+
+    output$preview <- renderDataTable(head(data()))
+
+    output$download <- downloadHandler(filename = function() paste0(input$dataset, ".tsv"),
+                                       content = function(file) vroom_write(data(), file))
+}
+
+shinyApp(ui, server)
+```
+
+Note the use of validate() to only allow the user to download datasets that are dataframes. A better approach would be to prefilter the list.
+
+## Downloading Reports 
+
+As well as downloading data, we may want users of the app to be able to download a report that summarizes the result of interactive exploration in the shiny app.
