@@ -1,0 +1,17 @@
+# Dynamic UI 
+
+```{r}
+library(tidyverse)
+library(shiny)
+```
+
+There are three key techniques for creating dynamic user interfaces: 
+
+- using update functions to modify the parameters of input controls 
+- using tabsetPanel to conditionally show and hide parts of the ui 
+- using uiOutput and renderUI to generate selected parts of the user interface with code 
+
+A word of warning: These can make your app harder to reason about 
+
+## Updating Inputs
+
