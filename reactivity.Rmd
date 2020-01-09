@@ -523,3 +523,4 @@ Observers and outputs are closely related. We can think of outputs as having a s
 #+DOWNLOADED: /tmp/screenshot.png @ 2020-01-05 22:14:45
 [[file:screenshot_2020-01-05_22-14-45.png]]
 
+
