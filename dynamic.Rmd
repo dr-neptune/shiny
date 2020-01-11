@@ -189,6 +189,38 @@ ui <- fluidPage(
     dateInput("date", "date"))
 
 server <- function(input, output, session) {
-    observeEvent(input$date)
+    observeEvent(input$year, {
+        newDateMin <- reactive(format(paste0(input$year, "-01-01")))
+        newDateMax <- reactive(format(paste0(input$year, "-12-31")))
+        updateDateInput(session, "date",
+                        min = newDateMin(),
+                        max = newDateMax())})
 }
+
+sp()
+```
+
+2. Complete the interface below with a server function that updates input$county choices based on input$state. For an added challenge, also change the label from "County" to "Parrish" for Louisiana and "Borrough" for "Alaska".
+
+```{r}
+library(openintro)
+states <- unique(county$state)
+
+county %>% filter(state == "Massachusetts") %>% .$name %>% unique()
+
+ui <- fluidPage(
+    selectInput("state", "State", choices = states),
+    selectInput("county", "County", choices = NULL))
+
+server <- function(input, output, session) {
+    statein <- reactive({
+        chosen_state <- reactive(county %>%
+                                 filter(state == input$state))})
+
+    observeEvent(statein(), {
+        choices <- statein()$name %>% unique()
+        updateSelectInput(session, "county", choices = choices)})
+}
+
+sp()
 ```
