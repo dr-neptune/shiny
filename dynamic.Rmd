@@ -3,6 +3,10 @@
 ```{r}
 library(tidyverse)
 library(shiny)
+
+sp <- function() {
+    shinyApp(ui, server)
+}
 ```
 
 There are three key techniques for creating dynamic user interfaces: 
@@ -15,3 +19,176 @@ A word of warning: These can make your app harder to reason about
 
 ## Updating Inputs
 
+We will start with a technique that allows the user to modify an input after it has been created. Every input control, i.e. textInput is paired with an update function, i.e. updateTextInput, that allows you to modify the control after it has been created. 
+
+The update functions all take session as the first argument and the name of the input as the second argument. 
+
+The key idea in the app below is that we can use observeEvent to trigger updateNumericInput whenever the min or max inputs change. 
+
+```{r}
+ui <- fluidPage(
+    numericInput("min", "Minimum", 0),
+    numericInput("max", "Maximum", 3),
+    sliderInput("n", "n", min = 0, max = 3, value = 1))
+
+server <- function(input, output, session) {
+    observeEvent(input$min, updateNumericInput(session, "n", min = input$min))
+    observeEvent(input$max, updateNumericInput(session, "n", max = input$max))
+}
+
+shinyApp(ui, server)
+```
+
+## Simple Uses
+
+The simplest uses of update functions are to provide small conveniences for the user. 
+
+For example, you may want to make it easy to reset parameters back to their initial value. 
+
+```{r}
+ui <- fluidPage(
+    sliderInput("x1", "x1", 0, min = -10, max = 10),
+    sliderInput("x2", "x2", 0, min = -10, max = 10),
+    sliderInput("x3", "x3", 0, min = -10, max = 10),
+    actionButton("reset", "Reset"))
+
+server <- function(input, output, session) {
+    observeEvent(input$reset, {
+        updateNumericInput(session, "x1", value = 0)
+        updateNumericInput(session, "x2", value = 0)
+        updateNumericInput(session, "x3", value = 0)})}
+
+sp()
+```
+
+A similar action is to tweak the text of an action button so that you know exactly what its going to do
+
+```{r}
+ui <- fluidPage(
+    numericInput("n", "Simulations", 10),
+    actionButton("simulate", "Simulate"))
+
+server <- function(input, output, session) {
+    observeEvent(input$n, {
+        label <- paste0("Simulate ", input$n, " times")
+        updateActionButton(session, "simulate", label = label)})}
+
+sp()
+```
+
+## Hierarchical Select Boxes
+
+A more complicated, but useful, application of the update function is to allow interactive drill down across multiple categories. 
+
+```{r}
+sales <- vroom::vroom("sales_data_sample.csv", col_types = list())
+```
+
+There is a natural hierarchy in the data:
+
+- each territory contains customers 
+- each customer has multiple orders
+- each order contains rows
+
+We want to create a user interface where you can:
+
+- select a territory to see all customers 
+- select a customer to see all orders 
+- select an order to see the underlying rows 
+
+The ui has three select boxes and one output table. The choices for customername and ordernumber select boxes are dynamically generated, so we set choices = NULL
+
+```{r}
+ui <- fluidPage(
+    selectInput("territory", "Territory", choices = unique(sales$TERRITORY)),
+    selectInput("customername", "Customer", choices = NULL),
+    selectInput("ordernumber", "Order Number", choices = NULL),
+    tableOutput("data"))
+```
+
+In the server function, we can work top down:
+
+- create a reactive territory() that contains the rows from sales that match the selected territory
+- whenever territory changes, update the list of choices in the input$customername select box 
+- create another reactive, customer(), which contains rows from territory() that match the selected customer
+- whenever customer changes, update the list of choices in the input$ordernumber select box 
+- display the selected orders in output$data 
+
+```{r}
+server <- function(input, output, session) {
+    territory <- reactive(sales %>% filter(TERRITORY == input$territory))
+    
+    observeEvent(territory(), {
+        choices <- unique(territory()$CUSTOMERNAME)
+        updateSelectInput(session, "customername", choices = choices)})
+
+    customer <- reactive({
+        req(input$customername)
+        territory() %>% filter(CUSTOMERNAME == input$customername)})
+    
+    observeEvent(customer(), {
+        choices <- unique(customer()$ORDERNUMBER)
+        updateSelectInput(session, "ordernumber", choices = choices)})
+
+    output$data <- renderTable({
+        req(input$ordernumber)
+        customer() %>%
+            filter(ORDERNUMBER == input$ordernumber) %>%
+            select(QUANTITYORDERED, PRICEEACH, PRODUCTCODE)})}
+
+sp()
+```
+
+## Circular References
+
+From shinys perspective, using an update function to modify value is no different than a user modifying the value by clicking or typing. This can lead to hairy situations in which we get feedback loops. Here is an example:
+
+```{r}
+ui <- fluidPage(numericInput("n", "n", 0))
+
+server <- function(input, output, session) {
+    observeEvent(input$n,
+                 updateNumericInput(session, "n", value = input$n + 1))}
+
+sp()
+```
+
+This problem can crop up if you update multiple controls that depend on one another, as in the next example
+
+## Inter-related Inputs
+
+One place where its easy to end up with circular references is when you have multiple sources of truth in an app. 
+
+```{r}
+ui <- fluidPage(
+    numericInput("temp_c", "Celsius", NA),
+    numericInput("temp_f", "Fahrenheit", NA))
+
+server <- function(input, output, session) {
+    observeEvent(input$temp_f, {
+        c <- round((input$temp_f - 32) * 5 / 9)
+        updateNumericInput(session, "temp_c", value = c)})
+
+    observeEvent(input$temp_c, {
+        f <- round((input$temp_c * 9 / 5) + 32)
+        updateNumericInput(session, "temp_f", value = f)})
+}
+
+sp()
+```
+
+Sometimes the app triggers multiple changes. There is no way around this problem because we have one idea (temperature) with multiple expressions in the app (celsius and fahrenheit). Here we are fortunate that the cycle quickly converges to a value that satisfies both constraints. In general we are best off avoiding this problem. 
+
+## Exercises 
+
+1. 
+
+```{r}
+ui <- fluidPage(
+    numericInput("year", "year", value = 2020),
+    dateInput("date", "date"))
+
+server <- function(input, output, session) {
+    observeEvent(input$date)
+}
+```
