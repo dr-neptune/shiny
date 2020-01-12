@@ -260,7 +260,7 @@ sp()
 4. Extend the previous app so that you can also choose to select no continent and see all the countries. 
 
 ```{r}
-continents <- unique(gapminder$continent) %>% prepend("all")
+continents <- unique(c("all", as.character(gapminder$continent)))
 
 ui <- fluidPage(
     selectInput("continent", "Continent", choices = continents),
@@ -288,3 +288,6 @@ server <- function(input, output, session) {
 
 sp()
 ```
+
+5. Linear dependent inputs
+
