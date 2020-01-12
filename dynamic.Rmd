@@ -206,7 +206,7 @@ sp()
 library(openintro)
 states <- unique(county$state)
 
-county %>% filter(state == "Massachusetts") %>% .$name %>% unique()
+county %>% filter(state == "Massachusetts") %>% select(name) %>% map(as.character) %>% flatten_chr()
 
 ui <- fluidPage(
     selectInput("state", "State", choices = states),
@@ -215,11 +215,75 @@ ui <- fluidPage(
 server <- function(input, output, session) {
     statein <- reactive({
         chosen_state <- reactive(county %>%
-                                 filter(state == input$state))})
+                                 filter(state := input$state) %>%
+                                 select(name) %>%
+                                 map(as.character) %>%
+                                 flatten_chr())})
 
     observeEvent(statein(), {
-        choices <- statein()$name %>% unique()
-        updateSelectInput(session, "county", choices = choices)})
+        updateSelectInput(session, "county", choices = statein())})
+}
+
+sp()
+```
+
+FIX THIS^^^
+
+3. Complete the user interface below with a server function that updates input$country choices based on the input$continent. Use output$data to display all matching rows 
+
+```{r}
+library(gapminder)
+continents <- unique(gapminder$continent)
+
+ui <- fluidPage(
+    selectInput("continent", "Continent", choices = continents),
+    selectInput("country", "Country", choices = NULL),
+    tableOutput("data"))
+
+server <- function(input, output, session) {
+    countries <- reactive({
+        gapminder %>% filter(continent == input$continent)})
+
+    observeEvent(countries(), {
+        choices <- countries()$country %>% unique()
+        updateSelectInput(session, "country", choices = choices)})
+
+    output$data <- renderTable({
+        req(input$country)
+        countries() %>%
+            filter(country == input$country)})
+}
+
+sp()
+```
+
+4. Extend the previous app so that you can also choose to select no continent and see all the countries. 
+
+```{r}
+continents <- unique(gapminder$continent) %>% prepend("all")
+
+ui <- fluidPage(
+    selectInput("continent", "Continent", choices = continents),
+    selectInput("country", "Country", choices = NULL),
+    tableOutput("data"))
+
+server <- function(input, output, session) {
+    countries <- reactive({
+        if (input$continent == "all") {
+            gapminder
+        } else {
+            gapminder %>% filter(continent == input$continent)
+        }})
+        ## gapminder %>% filter(continent == input$continent)})
+        
+    observeEvent(countries(), {
+        choices <- countries()$country %>% unique()
+        updateSelectInput(session, "country", choices = choices)})
+
+    output$data <- renderTable({
+        req(input$country)
+        countries() %>%
+            filter(country == input$country)})
 }
 
 sp()
