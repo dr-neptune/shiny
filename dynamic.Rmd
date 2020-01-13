@@ -466,7 +466,7 @@ There are three key ideas in the server function:
 
 - col_names() generated a character vector giving the name of each of the color inputs about to be generated 
 - create the text boxes using map to create one textInput for input in col_names. output col inserts these text boxes in the ui placeholder created earlier 
-- To generate the output we need to use a different trick. Usually we use $, but in this case, we are using a character vector. Instead we use [] and map_chr collects all values into a character vector and displays it in output$palette
+- To generate the output we need to use a different trick. Usually we use $, but in this case, we are using a character vector. Instead we use [] and map_chr collects all values into a character vector and displays it in output\$palette
 
 ```{r}
 server <- function(input, output, session) {
@@ -618,6 +618,79 @@ server <- function(input, output, session) {
         reduce(each_var, `&`)})
 
     output$data <- renderTable(head(data()[selected(), ], 12))}
+
+sp()
+```
+
+# Exercises
+
+1. Given the simple app below
+
+```{r}
+ui <- fluidPage(
+    selectInput("type", "type", c("slider", "numeric")),
+    uiOutput("numeric"))
+
+server <- function(input, output, session) {
+    output$numeric <- renderUI({
+        if (input$type == "slider") {
+            sliderInput("n", "n", value = 0, min = 0, max = 100)
+        } else {
+            numericInput("n", "n", value = 0, min = 0, max = 100)}})}
+
+sp()
+```
+
+How could we instead implement it using dynamic visibility? If we implement dynamic visibility, how could we keep the values in sync when the controls change? 
+
+```{r}
+dyn_widget <- function(x) {
+    if (x == "slider") {
+        sliderInput("dynamic", "n",
+                    value = 1,
+                    ## value = isolate(input$dynamic),
+                    min = 0, max = 100)
+    } else {
+        numericInput("dynamic", "n",
+                     value = 1,
+                     ## value = isolate(input$dynamic),
+                     min = 0, max = 100)}}
+
+ui <- fluidPage(
+    selectInput("type", "type", c("slider", "numeric")),
+    uiOutput("numeric"))
+
+server <- function(input, output, session) {
+    output$numeric <- renderUI(dyn_widget(input$type))
+}
+
+sp()
+```
+
+```{r}
+ui <- fluidPage(
+    tags$style("#switchControl { display:none; }"),
+    sidebarLayout(
+        sidebarPanel(
+            selectInput("controller", "Type", choices = c("slider", "numeric"))),
+        mainPanel(
+            tabsetPanel(
+                id = "switchControl",
+                tabPanel("slider",
+                         dyn_widget("slider")),
+                tabPanel("numeric",
+                         dyn_widget("numeric"))))))
+
+# FIX THIS
+
+## server <- function(input, output, session) {
+##     observeEvent(input$controller, {
+##         updateTabsetPanel(session, "switchControl", selected = input$controller)
+##         observeEvent(input$switchControl, {
+##             val <- reactive(input$dynamic)
+##             updateSelectInput(value = 5)
+##             updateNumericInput(value = 6)
+##     })})}
 
 sp()
 ```
