@@ -291,3 +291,333 @@ sp()
 
 5. Linear dependent inputs
 
+# Dynamic Visibility
+
+The next step up in complexity is selectively showing and hiding parts of the ui. 
+
+First up we will look at concealing optional ui in a tabset. This allows us to show and hide the ui as needed without having to regenerate it from scratch. Currently we need a smidgen of css to make the technique work:
+
+tag$style("#switcher { display:none; }") where #switcher is the #id of your tabset panel 
+
+```{r}
+ui <- fluidPage(
+    tags$style("#switcher { display:none; }"),
+    sidebarLayout(
+        sidebarPanel(
+            selectInput("controller", "Show", choices = paste0("panel", 1:3))),
+        mainPanel(
+            tabsetPanel(
+                id = "switcher",
+                tabPanel("panel1", "Panel 1 Content"),
+                tabPanel("panel2", "Panel 2 Content"),
+                tabPanel("panel3", "Panel 3 Content")))))
+
+server <- function(input, output, session) {
+    observeEvent(input$controller, {
+        updateTabsetPanel(session, "switcher", selected = input$controller)})}
+
+sp()
+```
+
+## Conditional UI
+
+Imagine that you want an app that allows the user to simulate from the normal, uniform, and exponential distributions. Here we put the unique user interface for each distribution in its own tabPanel and then arrange the three tabs into a tabsetPanel
+
+```{r}
+# this will be embedded into ui
+parameter_tabs <- tagList(
+    tags$style("#params { display:none; }"),
+    tabsetPanel(id = "params",
+                tabPanel("normal",
+                         numericInput("mean", "mean", value = 1),
+                         numericInput("sd", "standard deviation",
+                                      min = 0, value = 1)),
+                tabPanel("uniform",
+                         numericInput("min", "min", value = 0),
+                         numericInput("max", "max", value = 1)),
+                tabPanel("exponential",
+                         numericInput("rate", "rate", value = 1, min = 0))))
+
+ui <- fluidPage(
+    sidebarLayout(
+        sidebarPanel(
+            selectInput("dist", "Distribution",
+                        # match choices to input$dist
+                        choices = c("normal", "uniform", "exponential")),
+            numericInput("n", "Number of Samples", value = 100),
+            parameter_tabs),
+        mainPanel(plotOutput("hist"))))
+
+server <- function(input, output, session) {
+    observeEvent(input$dist, {
+        updateTabsetPanel(session, "params",
+                          selected = input$dist)})
+
+    sample <- reactive({
+        switch(input$dist,
+               normal = rnorm(input$n, input$mean, input$sd),
+               uniform = runif(input$n, input$min, input$max),
+               exponential = rexp(input$n, input$rate))})
+
+    output$hist <- renderPlot(hist(sample()))}
+
+sp()
+```
+
+## Wizard Interface
+
+We can use this idea to make a wizard, a type of interface that makes it easy to collect a bunch of information by spreading it across multiple web pages. Here we embed action buttons within each page making it easy to go forward and back. 
+
+```{r}
+ui <- fluidPage(
+    tags$style("#wizard { display:none; }"),
+    tabsetPanel(id = "wizard",
+                tabPanel("page1",
+                         "Welcome!",
+                         actionButton("page12", "next")),
+                tabPanel("page2",
+                         "Only one page to go",
+                         actionButton("page21", "prev"),
+                         actionButton("page23", "next")),
+                tabPanel("page3",
+                         "You're Done!",
+                         actionButton("page32", "prev"))))
+
+server <- function(input, output, session) {
+    switch_tab <- function(page) {
+        updateTabsetPanel(session, "wizard", selected = page)}
+
+    observeEvent(input$page12, switch_tab("page2"))
+    observeEvent(input$page21, switch_tab("page1"))
+    observeEvent(input$page23, switch_tab("page3"))
+    observeEvent(input$page32, switch_tab("page2"))
+}
+
+sp()
+```
+
+# Dialog Boxes
+
+Not yet implemented in the book. Check back!
+
+# Creating UI with Code
+
+There is one last technique this chapter covers that gives you the ability to create any controls (both inputs and outputs) with code in the server function. This technique allows us to regenerate the ui code while the app is running.
+
+The technique has two components:
+
+- use uiOutput to insert a placeholder in the user interface. This is run when the app launches and it leaves a hole that the server code can later fill in
+- renderUI fills the placeholder with the ui generated in the server function
+
+Here is a simple example that dynamically creates a different type of input control depending on an input. 
+
+```{r}
+ui <- fluidPage(
+    textInput("label", "label"),
+    selectInput("type", "type", c("slider", "numeric")),
+    uiOutput("numeric"))
+
+server <- function(input, output, session) {
+    output$numeric <- renderUI({
+        if (input$type == "slider") {
+            sliderInput("dynamic", input$label, value = 0, min = 0, max = 10)
+        } else {
+            numericInput("dynamic", input$label, value = 0, min = 0, max = 10)}})}
+
+sp()
+```
+
+Theres a problem: When you change controls, you lose the currently selected values. It is generally better practice to selectively show and hide ui as above. We can fix the problem by setting the value of the new input to the current value of the existing control 
+
+```{r}
+server <- function(input, output, session) {
+    output$numeric <- renderUI({
+        if (input$type == "slider") {
+            sliderInput("dynamic", input$label,
+                        value = isolate(input$dynamic),
+                        min = 0, max = 10)
+        } else {
+            numericInput("dynamic", input$label,
+                         value = isolate(input$dynamic),
+                         min = 0, max = 10)}})}
+
+sp()
+```
+
+isolate() ensures that we don't create a reactive dependency that would mean the code is rerun every time input$dynamic changes. We only want to change it when input$type or input$label changes. 
+
+Dynamic UI is most useful when you are generating an arbitrary number of controls. This is a good use case for purrr 
+
+## Multiple Controls 
+
+An important use of renderUI() is when we need to create an arbitrary number of controls. 
+
+The ui has a numericInput that controls the number of inputs, a uiOutput where the generated text boxes will go, and a textOutput that demonstrates that we have plumbed everything together correctly.
+
+```{r}
+ui <- fluidPage(
+    numericInput("n", "Number of Colors",
+                 value = 5, min = 1),
+    uiOutput("col"),
+    textOutput("palette"))
+```
+
+There are three key ideas in the server function:
+
+- col_names() generated a character vector giving the name of each of the color inputs about to be generated 
+- create the text boxes using map to create one textInput for input in col_names. output col inserts these text boxes in the ui placeholder created earlier 
+- To generate the output we need to use a different trick. Usually we use $, but in this case, we are using a character vector. Instead we use [] and map_chr collects all values into a character vector and displays it in output$palette
+
+```{r}
+server <- function(input, output, session) {
+    col_names <- reactive(paste0("col", seq_len(input$n)))
+
+    output$col <- renderUI(map(col_names(), ~ textInput(.x, NULL)))
+
+    output$palette <- renderText(map_chr(col_names(), ~ input[[.x]]))
+}
+
+sp()
+```
+
+This app has a problem in that it deletes all the current values when you increase the number of colors. To fix this we need to use isolate again. 
+
+Here is a more fleshed out version of the app
+
+```{r}
+ui <- fluidPage(
+    sidebarLayout(
+        sidebarPanel(
+            numericInput("n", "Number of Colors",
+                         value = 5, min = 1),
+            uiOutput("col")),
+        mainPanel(
+            plotOutput("plot"))))
+
+server <- function(input, output, session) {
+    col_names <- reactive(paste0("col", seq_len(input$n)))
+
+    output$col <- renderUI({
+        map(col_names(),
+            ~ textInput(.x, NULL, value = isolate(input[[.x]])) %||% "")})
+
+    output$plot <- renderPlot({
+        cols <- map_chr(col_names(), ~ input[[.x]])
+        cols[cols == ""] <- NA
+
+        barplot(
+            rep(1, length(cols)),
+            col = cols,
+            space = 0,
+            axes = FALSE)})}
+
+sp()
+```
+
+## Dynamic Filtering 
+
+Now we are going to make an app that allows the user to dynamically filter any data frame. Each numeric input will get a range slider and each factor input will get a multi select. 
+
+Lets start with a function that creates the UI for a single variable. It will return a slider for numeric inputs, a multi select for factor inputs and NULL for all other types 
+
+```{r}
+make_ui <- function(x, var) {
+    if (is.numeric(x)) {
+        rng <- range(x, na.rm = TRUE)
+        sliderInput(var, var,
+                    min = rng[1], max = rng[2], value = rng)
+    } else if (is.factor(x)) {
+        levs <- levels(x)
+        selectInput(var, var,
+                    choices = levs, selected = levs, multiple = TRUE)
+    } else {
+        # not supported
+        NULL}}
+```
+
+The server function takes the variable and value of the input control and returns a logical vector saying whether or not to include each observation. The logical vector makes it easy to combine the results from multiple columns 
+
+```{r}
+filter_var <- function(x, var) {
+    if (is.numeric(x)) {
+        !is.na(x) & x >= var[1] & x <= var[2]
+    } else if (is.factor(x)) {
+        x %in% var
+    } else {
+        # no control, dont filter
+        TRUE}}
+```
+
+Now we can use these functions to generate a simple filtering UI for the iris dataset.
+
+```{r}
+ui <- fluidPage(
+    sidebarLayout(
+        sidebarPanel(
+            make_ui(iris$Sepal.Length, "Sepal.Length"),
+            make_ui(iris$Sepal.Width, "Sepal.Width"),
+            make_ui(iris$Species, "Species")),
+        mainPanel(tableOutput("data"))))
+
+server <- function(input, output, session) {
+    selected <- reactive({
+        filter_var(iris$Sepal.Length, input$Sepal.Length) &
+            filter_var(iris$Sepal.Width, input$Sepal.Width) &
+            filter_var(iris$Species, input$Species)})
+
+    output$data <- renderTable(head(iris[selected(), ], 12))}
+
+sp()
+```
+
+The app had a lot of copy pasta, so it only got three columns. We can increase this with functional programming.
+
+- in ui use map() to generate one control for each variable 
+- in server(), use map() to generate the selection vector for each variable. Then use reduce to take the logical vector for each variable and combine into a single logical vector by &ing each vector together 
+
+```{r}
+ui <- fluidPage(
+    sidebarLayout(
+        sidebarPanel(
+            map(names(iris), ~ make_ui(iris[[.x]], .x))),
+        mainPanel(tableOutput("data"))))
+
+server <- function(input, output, session) {
+    selected <- reactive({
+        each_var <- map(names(iris), ~ filter_var(iris[[.x]], input[[.x]]))
+        reduce(each_var, `&`)})
+
+    output$data <- renderTable(head(iris[selected(), ], 12))}
+
+sp()
+```
+
+From there its an easy generalization to work with any data frame. Here we illustrate it using the data frames in the datasets package, but this could easily be extended to uploaded data. 
+
+```{r}
+dfs <- keep(ls("package:datasets"), ~ is.data.frame(get(.x, "package:datasets")))
+
+ui <- fluidPage(
+    sidebarLayout(
+        sidebarPanel(
+            selectInput("dataset", label = "Dataset", choices = dfs),
+            uiOutput("filter")),
+        mainPanel(tableOutput("data"))))
+
+server <- function(input, output, session) {
+    data <- reactive({
+        get(input$dataset, "package:datasets")})
+
+    vars <- reactive(names(data()))
+
+    output$filter <- renderUI(
+        map(vars(), ~ make_ui(data()[[.x]], .x)))
+
+    selected <- reactive({
+        each_var <- map(vars(), ~ filter_var(data()[[.x]], input[[.x]]))
+        reduce(each_var, `&`)})
+
+    output$data <- renderTable(head(data()[selected(), ], 12))}
+
+sp()
+```
