@@ -595,6 +595,7 @@ sp()
 From there its an easy generalization to work with any data frame. Here we illustrate it using the data frames in the datasets package, but this could easily be extended to uploaded data. 
 
 ```{r}
+
 dfs <- keep(ls("package:datasets"), ~ is.data.frame(get(.x, "package:datasets")))
 
 ui <- fluidPage(
@@ -620,6 +621,8 @@ server <- function(input, output, session) {
     output$data <- renderTable(head(data()[selected(), ], 12))}
 
 sp()
+
+
 ```
 
 # Exercises
@@ -644,30 +647,6 @@ sp()
 How could we instead implement it using dynamic visibility? If we implement dynamic visibility, how could we keep the values in sync when the controls change? 
 
 ```{r}
-dyn_widget <- function(x) {
-    if (x == "slider") {
-        sliderInput("dynamic", "n",
-                    value = 1,
-                    ## value = isolate(input$dynamic),
-                    min = 0, max = 100)
-    } else {
-        numericInput("dynamic", "n",
-                     value = 1,
-                     ## value = isolate(input$dynamic),
-                     min = 0, max = 100)}}
-
-ui <- fluidPage(
-    selectInput("type", "type", c("slider", "numeric")),
-    uiOutput("numeric"))
-
-server <- function(input, output, session) {
-    output$numeric <- renderUI(dyn_widget(input$type))
-}
-
-sp()
-```
-
-```{r}
 ui <- fluidPage(
     tags$style("#switchControl { display:none; }"),
     sidebarLayout(
@@ -677,20 +656,121 @@ ui <- fluidPage(
             tabsetPanel(
                 id = "switchControl",
                 tabPanel("slider",
-                         dyn_widget("slider")),
+                         uiOutput("controls1")),
                 tabPanel("numeric",
-                         dyn_widget("numeric"))))))
+                         uiOutput("controls2"))))))
 
-# FIX THIS
+server <- function(input, output, session) {
+    observeEvent(input$controller, {
+        updateTabsetPanel(session, "switchControl",
+                          selected = input$controller)})
 
-## server <- function(input, output, session) {
-##     observeEvent(input$controller, {
-##         updateTabsetPanel(session, "switchControl", selected = input$controller)
-##         observeEvent(input$switchControl, {
-##             val <- reactive(input$dynamic)
-##             updateSelectInput(value = 5)
-##             updateNumericInput(value = 6)
-##     })})}
+    output$controls1 <- renderUI({
+            sliderInput("dynamic", "n",
+                        value = isolate(input$dynamic),
+                        min = 0, max = 100)})
+
+    output$controls2 <- renderUI({
+         numericInput("dynamic", "n",
+                      value = isolate(input$dynamic),
+                      min = 0, max = 100)})}
 
 sp()
+```
+
+2. Add support for date and time columns in make/_ui and filter/_var
+
+```{r}
+make_ui <- function(x, var) {
+    if (is.numeric(x)) {
+        rng <- range(x, na.rm = TRUE)
+        sliderInput(var, var,
+                    min = rng[1], max = rng[2], value = rng)
+    } else if (is.factor(x)) {
+        levs <- levels(x)
+        selectInput(var, var,
+                    choices = levs, selected = levs, multiple = TRUE)
+    } else {
+        # not supported
+        NULL}}
+
+filter_var <- function(x, var) {
+    if (is.numeric(x)) {
+        !is.na(x) & x >= var[1] & x <= var[2]
+    } else if (is.factor(x)) {
+        x %in% var
+    } else {
+        # no control, dont filter
+        TRUE}}
+
+make_ui <- function(x, var) {
+    if (is.numeric(x)) {
+        rng <- range(x, na.rm = TRUE)
+        sliderInput(var, var,
+                    min = rng[1], max = rng[2], value = rng)
+    } else if (is.factor(x)) {
+        levs <- levels(x)
+        selectInput(var, var,
+                    choices = levs, selected = levs, multiple = TRUE)
+    } else {
+        # not supported
+        NULL}}
+
+make_ui <- function(x, var) {
+    require(lubridate)
+    
+    if (is.numeric(x)) {
+        rng <- range(x, na.rm = TRUE)
+        sliderInput(var, var,
+                    min = rng[1], max = rng[2], value = rng)
+    } else if (is.factor(x)) {
+        levs <- levels(x)
+        selectInput(var, var,
+                    choices = levs, selected = levs, multiple = TRUE)
+    } else if (is.Date(x)) {
+        # This needs a dataset with proper dates to test on
+        max_date <- ceiling_date(x)
+}
+}
+
+filter_var <- function(x, var) {
+    require(lubridate)
+    
+    if (is.numeric(x)) {
+        !is.na(x) & x >= var[1] & x <= var[2]
+    } else if (is.factor(x)) {
+        x %in% var
+    } else if (is.Date(x)) {
+        x >= var[1] & x <= var[2]
+    } else {
+        TRUE}}
+
+dfs <- keep(ls("package:datasets"), ~ is.data.frame(get(.x, "package:datasets")))
+
+ui <- fluidPage(
+    sidebarLayout(
+        sidebarPanel(
+            selectInput("dataset", label = "Dataset", choices = dfs),
+            uiOutput("filter")),
+        mainPanel(tableOutput("data"))))
+
+
+
+server <- function(input, output, session) {
+    data <- reactive({
+        get(input$dataset, "package:datasets")})
+
+    vars <- reactive(names(data()))
+
+    output$filter <- renderUI(
+        map(vars(), ~ make_ui(data()[[.x]], .x)))
+
+    selected <- reactive({
+        each_var <- map(vars(), ~ filter_var(data()[[.x]], input[[.x]]))
+        reduce(each_var, `&`)})
+
+    output$data <- renderTable(head(data()[selected(), ], 12))}
+
+sp()
+
 ```
