@@ -109,10 +109,10 @@ ui <- fluidPage(
 In the server function, we can work top down:
 
 - create a reactive territory() that contains the rows from sales that match the selected territory
-- whenever territory changes, update the list of choices in the input$customername select box 
+- whenever territory changes, update the list of choices in the input\$customername select box 
 - create another reactive, customer(), which contains rows from territory() that match the selected customer
-- whenever customer changes, update the list of choices in the input$ordernumber select box 
-- display the selected orders in output$data 
+- whenever customer changes, update the list of choices in the input\$ordernumber select box 
+- display the selected orders in output\$data 
 
 ```{r}
 server <- function(input, output, session) {
@@ -200,7 +200,7 @@ server <- function(input, output, session) {
 sp()
 ```
 
-2. Complete the interface below with a server function that updates input$county choices based on input$state. For an added challenge, also change the label from "County" to "Parrish" for Louisiana and "Borrough" for "Alaska".
+2. Complete the interface below with a server function that updates input\$county choices based on input\$state. For an added challenge, also change the label from "County" to "Parrish" for Louisiana and "Borrough" for "Alaska".
 
 ```{r}
 library(openintro)
@@ -229,7 +229,7 @@ sp()
 
 FIX THIS^^^
 
-3. Complete the user interface below with a server function that updates input$country choices based on the input$continent. Use output$data to display all matching rows 
+3. Complete the user interface below with a server function that updates input\$country choices based on the input\$continent. Use output\$data to display all matching rows 
 
 ```{r}
 library(gapminder)
@@ -297,7 +297,7 @@ The next step up in complexity is selectively showing and hiding parts of the ui
 
 First up we will look at concealing optional ui in a tabset. This allows us to show and hide the ui as needed without having to regenerate it from scratch. Currently we need a smidgen of css to make the technique work:
 
-tag$style("#switcher { display:none; }") where #switcher is the #id of your tabset panel 
+tag\$style("#switcher { display:none; }") where #switcher is the #id of your tabset panel 
 
 ```{r}
 ui <- fluidPage(
@@ -444,7 +444,7 @@ server <- function(input, output, session) {
 sp()
 ```
 
-isolate() ensures that we don't create a reactive dependency that would mean the code is rerun every time input$dynamic changes. We only want to change it when input$type or input$label changes. 
+isolate() ensures that we don't create a reactive dependency that would mean the code is rerun every time input\$dynamic changes. We only want to change it when input\$type or input\$label changes. 
 
 Dynamic UI is most useful when you are generating an arbitrary number of controls. This is a good use case for purrr 
 
@@ -466,7 +466,7 @@ There are three key ideas in the server function:
 
 - col_names() generated a character vector giving the name of each of the color inputs about to be generated 
 - create the text boxes using map to create one textInput for input in col_names. output col inserts these text boxes in the ui placeholder created earlier 
-- To generate the output we need to use a different trick. Usually we use $, but in this case, we are using a character vector. Instead we use [] and map_chr collects all values into a character vector and displays it in output\$palette
+- To generate the output we need to use a different trick. Usually we use \$, but in this case, we are using a character vector. Instead we use [] and map_chr collects all values into a character vector and displays it in output\$palette
 
 ```{r}
 server <- function(input, output, session) {
@@ -681,6 +681,27 @@ sp()
 2. Add support for date and time columns in make/_ui and filter/_var
 
 ```{r}
+library(hms)
+library(lubridate)
+
+make_time <- function(number) {
+    minutes <- number %>% str_sub(start = -2)
+    hours <- number %>% str_sub(end = -3)
+
+    if (str_length(hours) < 2) {
+        hours <- paste0("0", hours)
+    }
+    
+    paste0(hours, ":", minutes)
+}
+
+flights <- nycflights13::flights %>%
+    select(-time_hour) %>%
+    filter(year == 2013) %>% 
+    mutate(given_date = paste(year, month, day, sep = "/") %>% as_date()) %>%
+    mutate_at(vars(contains("time")), make_time) %>%
+    head(50)
+
 make_ui <- function(x, var) {
     if (is.numeric(x)) {
         rng <- range(x, na.rm = TRUE)
@@ -718,7 +739,7 @@ make_ui <- function(x, var) {
 
 make_ui <- function(x, var) {
     require(lubridate)
-    
+
     if (is.numeric(x)) {
         rng <- range(x, na.rm = TRUE)
         sliderInput(var, var,
@@ -730,12 +751,22 @@ make_ui <- function(x, var) {
     } else if (is.Date(x)) {
         # This needs a dataset with proper dates to test on
         max_date <- ceiling_date(x)
+        min_date <- floor_date(x)
+        dateRangeInput(var, var,
+                       min = min_date, max = max_date)
+    } else {
+        NULL
+    }
 }
-}
+
+flights %>%
+    select(given_date) %>%
+    arrange() %>%
+    slice(nrow(.))
 
 filter_var <- function(x, var) {
     require(lubridate)
-    
+
     if (is.numeric(x)) {
         !is.na(x) & x >= var[1] & x <= var[2]
     } else if (is.factor(x)) {
@@ -745,12 +776,36 @@ filter_var <- function(x, var) {
     } else {
         TRUE}}
 
+# flights test
+ui <- fluidPage(
+    sidebarLayout(
+        sidebarPanel(
+            uiOutput("filter")),
+        mainPanel(tableOutput("data"))))
+
+server <- function(input, output, session) {
+    data <- reactive(flights)
+
+    vars <- reactive(names(data()))
+
+    output$filter <- renderUI(
+        map(vars(), ~ make_ui(data()[[.x]], .x)))
+
+    selected <- reactive({
+        each_var <- map(vars(), ~ filter_var(data()[[.x]], input[[.x]]))
+        reduce(each_var, `&`)})
+
+    output$data <- renderTable(head(data()[selected(), ], 12))}
+
+sp()
+
+
 dfs <- keep(ls("package:datasets"), ~ is.data.frame(get(.x, "package:datasets")))
 
 ui <- fluidPage(
     sidebarLayout(
         sidebarPanel(
-            selectInput("dataset", label = "Dataset", choices = dfs),
+            selectInput("dataset", label = "Dataset", choices = flights),
             uiOutput("filter")),
         mainPanel(tableOutput("data"))))
 
@@ -772,5 +827,8 @@ server <- function(input, output, session) {
     output$data <- renderTable(head(data()[selected(), ], 12))}
 
 sp()
-
 ```
+
+ON EXERCISE 2 -- RETURN TO IT 
+
+

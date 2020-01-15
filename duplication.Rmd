@@ -1,0 +1,82 @@
+# Reducing Duplication
+
+```{r}
+library(tidyverse)
+library(shiny)
+```
+
+Every piece of knowledge must have a single, unambiguous authoritive representation within a system.
+
+Advantages of functions and modules:
+
+- clearly isolated behavior through specified inputs and outputs means that it is easier to understand how parts of the app fit together, so we don't need to worry about spooky action at a distance where changing one part of the app changes the way an apparently unrelated part works
+- reducing duplication makes it easier to respond to changing needs because instead of having to track down and change every piece of duplicated code, we can just change it in one place 
+- we can spread our app across multiple files so that it can be more easily digested in chunks. 
+
+# Using Functions
+
+UI Code or self contained reactives are a good use case for functions. A function will only take you so far though because we typically need to have some connection between the front end and the back end, and we need some way to coordinate the two. Shiny uses identifiers, so we need some way to share them. This gives rise to shiny **modules**.
+
+## Helper Functions
+
+If, given specific values, our app requires a complex calculation, we should pull it out into a separate function. We want to go from this:
+
+```{r}
+server <- function() {
+    data <- reactive({
+        # some complex data calculation involving inputs x, y, z
+})}
+```
+
+to this:
+
+```{r}
+my_helper <- function(x, y, z) {
+    # ...
+}
+
+server <- function() {
+    data <- reactive({
+        my_helper(input$x, input$y, input$z)})}
+```
+
+When extracting out such helpers, avoid putting any reactive component inside the function. Instead pass them in through the arguments. 
+
+Advantages of functions: 
+
+- it allows us to move it to a separate file 
+- it makes it clear from the outside exactly what the function takes for inputs. When looking at a reactive expression or output, there is no easy way to tell exactly what values it depends on without carefully reading the code block
+- it enforces independence - if we try and refer to an input that was not passed to the function, we get an error. This becauses increasingly important as our apps get bigger because it ensures that the pieces of the app and independent and can be analyzed in isolation
+
+## UI Functions
+
+```{r}
+sliderInput01 <- function(id, label = id) {
+    sliderInput(id, label,
+                min = 0, max = 1, value = 0.5, step = 0.1)
+}
+
+ui <- fluidRow(
+    sliderInput01("alpha"),
+    sliderInput01("beta"),
+    sliderInput01("gamma"),
+    sliderInput01("delta")
+)
+```
+
+We could reduce it more with functional programming.
+
+fluidRow(!!!list(a, b)) is equivalent to fluidRow(a, b). This technique is sometimes called splatting because you're splatting the elements of a list into the arguments of a function. 
+
+```{r}
+vars <- c("alpha", "beta", "gamma", "delta")
+sliders <- map(vars, sliderInput01)
+ui <- fluidRow(!!!sliders)
+```
+
+## Reactives 
+
+We wish to keep as much inside the server function as possible.
+
+## Case Study 
+
