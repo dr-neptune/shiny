@@ -855,3 +855,144 @@ sp()
 ```
 
 <!-- STILL BROKEN, FIX THIS^^^ -->
+
+
+```{r}
+selectInputMammal <- function(id) {
+    ns <- NS(id)
+
+    choices <- c("sleep_total", "sleep_rem", "sleep_cycle",
+                 "awake", "brainwt", "bodywt")
+    
+    tagList(selectInput(ns("x_val"),
+                label = "x axis",
+                choices = choices,
+                selected = "sleep_total"),
+    selectInput(ns("y_val"),
+                label = "y axis",
+                choices = choices,
+                selected = "sleep_rem"),
+    tabsetPanel(id = ns("vore"),
+                tabPanel(ns("carni"),
+                         plotOutput(ns("plot"))),
+                tabPanel(ns("omni"),
+                         plotOutput(ns("plot"))),
+                tabPanel(ns("herbi"),
+                         plotOutput(ns("plot")))))
+}
+
+ui <- fluidPage(
+   selectInputMammal("mammals")
+)
+
+filterInputMammal <- function(input, output, server) {
+    df <- reactive({msleep %>%
+                        filter(vore == input$vore)})
+
+    output$plot <- renderPlot({
+        df() %>%
+            plotter(input$x_val, input$y_val)})
+}
+
+server <- function(input, output, session) {
+    data_filtered <- callModule(filterInputMammal, "mammals")
+}
+
+shinyApp(ui, server)
+```
+
+```{r}
+ui <- fluidPage(
+    selectInputMammal("mammal"))
+
+serverMammal <- function(input, output, session) {
+    df <- reactive({
+        filter(msleep, vore == input$vore)
+    })
+
+    df
+}
+
+server <- function(input, output, session) {
+    df <- callModule(serverMammal, "mammal")
+
+    output$plot_carni <- renderPlot({df() %>%
+        plotter(input$x_val, input$y_val)})
+}
+
+shinyApp(ui, server)
+```
+
+```{r}
+mod_ui <- function(id, title) {
+    ns <- NS(id)
+
+    tagList(
+        h2(title),
+        selectInput(
+            ns("what"),
+            "What",
+            choices = c("iris", "mtcars", "airquality")),
+        plotOutput(ns("plot")))
+}
+
+mod_server <- function(input, output, session) {
+    output$plot <- renderPlot({
+        switch(
+            input$what,
+            "iris" = plot(iris),
+            "mtcars" = plot(mtcars),
+            "airquality" = plot(airquality))})
+}
+
+ui <- fluidPage(
+    column(6, mod_ui("ui1", title = "left")),
+    column(6, mod_ui("ui2", title = "right")))
+
+server <- function(input, output, session) {
+    callModule(mod_server, "ui1")
+    callModule(mod_server, "ui2")
+}
+
+shinyApp(ui, server)
+```
+
+```{r}
+mod_ui <- function(id) {
+    ns <- NS(id)
+    
+    choices <- c("sleep_total", "sleep_rem", "sleep_cycle",
+                 "awake", "brainwt", "bodywt")
+    
+    tagList(
+        selectInput(ns("x"),
+                    label = "x value",
+                    choices = choices,
+                    selected = "sleep_total"),
+        selectInput(ns("y"),
+                    label = "y value",
+                    choices = choices,
+                    selected = "sleep_rem"))
+}
+
+mod_server <- function(input, output, session) {
+    ds <- reactive(filter(msleep, vore == input$vore))
+
+    output$plot <- df() %>% ggplot(aes_string(input$x, input$y)) + geom_point()
+}
+
+ui <- fluidPage(mod_ui("mammals"),
+                tabsetPanel(id = "vore",
+                            tabPanel("carni",
+                                     plotOutput("plot")),
+                            tabPanel("omni",
+                                     plotOutput("plot")),
+                            tabPanel("herbi",
+                                     plotOutput("plot"))))
+
+server <- function(input, output, session) {
+    callModule(mod_server, "mammals")
+}
+
+shinyApp(ui, server)
+```
