@@ -3,6 +3,10 @@
 ```{r}
 library(tidyverse)
 library(shiny)
+
+sp <- function(){
+    shinyApp(ui, server)
+}
 ```
 
 Every piece of knowledge must have a single, unambiguous authoritive representation within a system.
@@ -323,4 +327,315 @@ server <- function(input, output, session) {
 ```
 
 ## Limited Selection + Other
+
+Consider the following app which provides a way to select gender that is sensitive to the many possible ways that people can express their gender 
+
+```{r}
+ui <- fluidPage(
+    radioButtons("gender", "Gender:",
+                 choiceValues = list("male", "female", "self-described", "na"),
+                 choiceNames = list("Male", "Female",
+                                textInput("gender_self", NULL,
+                                          placeholder = "Self-Described"),
+                                "Prefer not to say"),
+                 selected = "na"),
+    textOutput("txt"))
+
+server <- function(input, output, session) {
+    observeEvent(input$gender_self, {
+        req(input$gender_self)
+        updateRadioButtons(session, "gender",
+                           selected = "self-described")})
+
+    gender <- reactive({
+        if (input$gender == "self-described") {
+            input$gender_self
+        } else {
+            input$gender
+        }})
+
+    output$txt <- renderText({
+        paste("You chose", gender())})}
+
+sp()
+```
+
+Now, converting to a module and generalizing a little 
+
+```{r}
+radioButtonsWithOther <- function(id, label, choices,
+                                  selected = NULL, placeholder = NULL) {
+    ns <- NS(id)
+
+    radioButtons(ns("primary"), "Gender:",
+                 choiceValues = c(names(choices), "other"),
+                 choiceNames = c(
+                     unname(choices),
+                     list(textInput(ns("other"),
+                                    NULL,
+                                    placeholder = NULL))),
+                     selected = selected)
+}
+
+radioButtonsWithOtherServer <- function(input, output, session) {
+    observeEvent(input$primary, {
+        req(input$other)
+        updateRadioButtons(session, "primary", selected = "other")})
+
+    reactive({
+        if (input$primary == "other") {
+            input$other
+        } else {
+            input$primary
+        }})}
+```
+
+```{r}
+ui <- fluidPage(
+    radioButtonsWithOther("gender",
+                          choices = list(
+                              male = "Male",
+                              female = "Female",
+                              na = "Prefer not to say"),
+                          placeholder = "Self-Described",
+                          selected = "na"),
+    textOutput("txt"))
+
+server <- function(input, output, session) {
+    gender <- callModule(radioButtonsWithOtherServer, "gender")
+
+    output$txt <- renderText(paste("You chose", gender()))
+}
+
+sp()
+```
+
+## Hierarchical Select Boxes
+
+```{r}
+country_df <- countrycode::codelist %>%
+    as_tibble() %>%
+    select(iso3c, continent, country = cow.name) %>%
+    filter(!is.na(continent), !is.na(country))
+
+continents <- country_df$continent %>% unique() %>% sort()
+
+ui <- fluidPage(
+    selectInput("continent", "Continent", choices = continents),
+    selectInput("country", "Country", choices = NULL))
+
+server <- function(input, output, session) {
+    countries <- reactive({
+        country_df[country_df$continent == input$continent, ,drop = FALSE]})
+
+    observeEvent(input$continent, {
+        updateSelectInput(session, "country", choice = countries()$country)})}
+
+sp()
+```
+
+## Modal
+
+```{r}
+modalContinue <- function(id) {
+    ns <- NS(id)
+
+    showModal(
+        modalDialog(
+            "This is really important!",
+            "Are you sure you want to continue?",
+            footer = list(
+                actionButton(ns("yes"), "yes"),
+                actionButton(ns("no"), "no")),
+            easyClose = FALSE))}
+
+modalContinueServer <- function(id) {
+    module <- function(input, output, session) {
+        val <- reactiveVal(NULL)
+
+        observeEvent(input$yes, {
+            removeModal()
+            val(TRUE)})
+
+        observeEvent(input$no, {
+            removeModal()
+            val(FALSE)})
+
+        reactive(val())}
+    callModule(module, id)}
+```
+
+```{r}
+ui <- fluidPage(
+    actionButton("go", "Go"),
+    textOutput("result"))
+
+server <- function(input, output, session) {
+    observeEvent(input$go, {
+        modalContinue("ok")})
+
+    result <- modalContinueServer("ok")
+
+    output$result <- renderText(result())
+}
+
+sp()
+```
+
+# Exercises
+
+1. The following app plots user selected variables from the msleep dataset for three different types of mammals (carnivores, omnivores, herbavores), with one tab for each type of mammal. Remove the redundancy in the selectInput definitions with the use of functions
+
+```{r}
+
+selectInputMammal <- function(id, label, selected = "sleep_rem") {
+    ns <- NS(id)
+    
+    choices <- c("sleep_total", "sleep_rem", "sleep_cycle",
+                 "awake", "brainwt", "bodywt")
+    
+    selectInput(inputId = ns("mammal"),
+                label = label,
+                choices = choices,
+                selected = selected)
+}
+
+ui <- fluidPage(
+    selectInputMammal("x", "X-axis"),
+    selectInputMammal("y", "Y-axis", selected = "sleep_total"),
+    tabsetPanel(id = "vore",
+                tabPanel("Carnivore",
+                         plotOutput("plot_carni")),
+                tabPanel("Omnivore",
+                         plotOutput("plot_omni")),
+                tabPanel("Herbivore",
+                         plotOutput("plot_herbi"))))
+```
+
+2. Further remove redundancy by modularizing how subsets and plots are created 
+
+```{r}
+# UI
+
+
+server <- function(input, output, session) {
+    # make subsets
+    carni <- mammalSelectInput("animal", "carni")
+    output$plot_carni <- make_plot_output(carni(), input$x, input$y)
+    
+    omni <- mammalSelectInput("animal", "omni")
+    output$plot_omni <- make_plot_output(omni(), input$x, input$y)
+    
+    herbi <- mammalSelectInput("animal", "herbi")
+    output$plot_herbi <- make_plot_output(herbi(), input$x, input$y)
+}
+
+sp()
+```
+
+### Extra Examples of Modules
+
+A small but complete application demonstrating a simple "counter" module
+
+```{r}
+# module UI
+counterButton <- function(id, label = "Counter") {
+    # initialize namespace for ui. This returns input[[paste(id, "-", "counter")]]
+    # This encapsulates the modules UI
+    ns <- NS(id)
+    
+    tagList(
+        actionButton(ns("button"), label = label),
+        verbatimTextOutput(ns("out")))}
+
+selectInputMammal <- function(id, label, selected = "sleep_rem") {
+    ns <- NS(id)
+    
+    choices <- c("sleep_total", "sleep_rem", "sleep_cycle",
+                 "awake", "brainwt", "bodywt")
+    
+    selectInput(inputId = ns("mammal"),
+                label = label,
+                choices = choices,
+                selected = selected)
+}
+
+# module server side logic
+counter <- function(input, output, session) {
+    # initialize counter
+    count <- reactiveVal(0)
+
+    observeEvent(input$button, {
+        count(count() + 1)
+    })
+
+    
+    output$out <- renderText(count())
+
+    # return a reactive value
+    count
+}
+
+subset_and_plot_mammal <- function(input, output, session) {
+    
+}
+
+ui <- fluidPage(counterButton("counter1", "Counter #1"))
+
+server <- function(input, output, session) {
+    # callmodule initializes the module 
+    callModule(counter, "counter1")
+}
+
+sp()
+```
+
+```{r}
+library(tidyverse)
+
+ui <- fluidPage(
+  selectInput(inputId = "x",
+              label = "X-axis:",
+              choices = c("sleep_total", "sleep_rem", "sleep_cycle", 
+                          "awake", "brainwt", "bodywt"),
+              selected = "sleep_rem"),
+  selectInput(inputId = "y",
+              label = "Y-axis:",
+              choices = c("sleep_total", "sleep_rem", "sleep_cycle", 
+                          "awake", "brainwt", "bodywt"),
+              selected = "sleep_total"),
+  tabsetPanel(id = "vore",
+              tabPanel("Carnivore",
+                       plotOutput("plot_carni")),
+              tabPanel("Omnivore",
+                       plotOutput("plot_omni")),
+              tabPanel("Herbivore",
+                       plotOutput("plot_herbi")))
+)
+
+server <- function(input, output, session) {
+
+  # make subsets
+  carni <- reactive( filter(msleep, vore == "carni") )
+  omni  <- reactive( filter(msleep, vore == "omni")  )
+  herbi <- reactive( filter(msleep, vore == "herbi") )
+
+  # make plots
+  output$plot_carni <- renderPlot({
+    ggplot(data = carni(), aes_string(x = input$x, y = input$y)) +
+      geom_point()
+  })
+  output$plot_omni <- renderPlot({
+    ggplot(data = omni(), aes_string(x = input$x, y = input$y)) +
+      geom_point()
+  })
+  output$plot_herbi <- renderPlot({
+    ggplot(data = herbi(), aes_string(x = input$x, y = input$y)) +
+      geom_point()
+  })
+
+}
+
+shinyApp(ui = ui, server = server)
+```
 
