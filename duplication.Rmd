@@ -535,6 +535,8 @@ sp()
 
 ### Extra Examples of Modules
 
+This is from https://shiny.rstudio.com/articles/modules.html
+
 A small but complete application demonstrating a simple "counter" module
 
 ```{r}
@@ -590,52 +592,266 @@ server <- function(input, output, session) {
 sp()
 ```
 
+Modules can represent input, output, or both. A module is composed of two functions that represent
+
+1. a piece of UI 
+2. a fragment of server logic that uses that UI 
+
+### Creating UI 
+
+The first argument to a UI should always be id. This is the namespace for the module. Note that the namespace for the module is decided by the caller at the time the module is used, not decided by the author at the time the module is writen. 
+
+Here is an example for a CSV file input module
+
 ```{r}
-library(tidyverse)
+csvFileInput <- function(id, label = "CSV File") {
+    # create a namespace function using the provided id
+    ns <- NS(id)
 
-ui <- fluidPage(
-  selectInput(inputId = "x",
-              label = "X-axis:",
-              choices = c("sleep_total", "sleep_rem", "sleep_cycle", 
-                          "awake", "brainwt", "bodywt"),
-              selected = "sleep_rem"),
-  selectInput(inputId = "y",
-              label = "Y-axis:",
-              choices = c("sleep_total", "sleep_rem", "sleep_cycle", 
-                          "awake", "brainwt", "bodywt"),
-              selected = "sleep_total"),
-  tabsetPanel(id = "vore",
-              tabPanel("Carnivore",
-                       plotOutput("plot_carni")),
-              tabPanel("Omnivore",
-                       plotOutput("plot_omni")),
-              tabPanel("Herbivore",
-                       plotOutput("plot_herbi")))
-)
-
-server <- function(input, output, session) {
-
-  # make subsets
-  carni <- reactive( filter(msleep, vore == "carni") )
-  omni  <- reactive( filter(msleep, vore == "omni")  )
-  herbi <- reactive( filter(msleep, vore == "herbi") )
-
-  # make plots
-  output$plot_carni <- renderPlot({
-    ggplot(data = carni(), aes_string(x = input$x, y = input$y)) +
-      geom_point()
-  })
-  output$plot_omni <- renderPlot({
-    ggplot(data = omni(), aes_string(x = input$x, y = input$y)) +
-      geom_point()
-  })
-  output$plot_herbi <- renderPlot({
-    ggplot(data = herbi(), aes_string(x = input$x, y = input$y)) +
-      geom_point()
-  })
-
-}
-
-shinyApp(ui = ui, server = server)
+    tagList(
+        fileInput(ns("file"), label),
+        checkboxInput(ns("heading"), "Has heading"),
+        selectInput(ns("quote"), "Quote",
+                    c("None" = "",
+                      "Double Quote" = "\"",
+                      "Single Quote" = "'")))}
 ```
 
+This looks similar to the ui.R file, with the following differences
+
+1. The function body starts with `ns <- NS(id)`. This takes the string `id` and creates a namespace function 
+2. Anything input or any output id needs to be wrapped in a call to `ns()`. 
+3. The results are wrapped in tagList instead of fluidPage, pageWithSidebar, etc. You only need to use tagList if you want to return a UI fragment that consists of multiple UI objects; if we were just returning a div or some specific input, we could skip taglist 
+
+Thanks to namespacing, we only need to make sure that the IDs "file", "heading", and "quote" are unique within this function, rather than unique across the entire app. 
+
+### Server Functions
+
+Module server functions should be named like their corresponding module ui functions, but without the input/output/ui suffix. Since our UI function was called csvFileInput, we'll call our server function csvFile
+
+```{r}
+csvFile <- function(input, output, session, stringsAsFactors) {
+    # the selected file, if any
+    userFile <- reactive({
+        validate(need(input$file, message = FALSE))
+        input$file})
+
+    # the users data, parsed into a data frame
+    dataframe <- reactive({
+        read.csv(userFile()$datapath,
+                 header = input$heading,
+                 quote = input$quote,
+                 stringsAsFactors = stringsAsFactors)})
+
+    # we can run observers in here if we want to
+    observe({
+        msg <- sprintf("File %s was uploaded", userFile()$name)
+        cat(msg, "\n")})
+
+    return(dataframe)
+}
+```
+
+This looks very similar to a server function. We can also add as many extra arguments to the function as desired, even ... if it makes sense to do so.
+
+Inside the function input$file refers to ns("file") in the ui function. If the example had outputs, we could similarly match up ns("plot") with output$plot. 
+
+The input, output, session objects are special in that they are scoped to the specific namespace that matches up with our ui function. Conversely, they can -not- access inputs/outputs outside of the namespace, nor can they directly access reactive expressions and reactive values from elsewhere in the application. Only lexically scoped reactive expressions/values can be used. 
+
+If a module needs to use a reactive expression, take the reactive expression as a function parameter. If a module wants to return reactive expressions to the calling app, then return a list of reactive expressions from the function.
+
+If a module needs to access an input that isn't part of the module, the containing app should pass the input value wrapped in a reactive expression (i.e. reactive(...)): `callModule(myModule, "myModule1", reactive(input$checkbox1))`
+
+### Using Modules
+
+This is how we would use the csvFileInput and csvFile functions together as a module in an app
+
+```{r}
+ui <- fluidPage(
+    sidebarLayout(
+        sidebarPanel(
+            csvFileInput("datafile", "User Data (.csv format)")),
+        mainPanel(
+            dataTableOutput("table"))))
+
+server <- function(input, output, session) {
+    # arg1 is the module server function
+    # arg2 is the id we will use as a namespace. this needs to match the ui id
+    datafile <- callModule(csvFile, "datafile", stringsAsFactors = FALSE)
+
+    output$table <- renderDataTable(datafile())
+}
+
+shinyApp(ui, server)
+```
+
+The UI function csvFileInput is called directly using "datafile" as the id. In this case we insert the generated UI into the sidebar. 
+
+The module server function is not called directly; instead, call the callModule function and provide the module server function as the first argument. 
+
+### Output Example
+
+Here is an example that consists of two linked scatterplots (selecting an area on one plot will highlight observations on both plots). 
+
+First we made the module UI function. We want two plots, plot1 and plot2 side by side with a common brush id of brush. 
+
+```{r}
+linkedScatterUI <- function(id) {
+    ns <- NS(id)
+
+    fluidRow(
+        column(6, plotOutput(ns("plot1"), brush = ns("brush"))),
+        column(6, plotOutput(ns("plot2"), brush = ns("brush"))))}
+```
+
+The module server function is next. Besides the mandatory in, out, sess parameters, we need to know the dataframe to plot and the column names that should be used for the x and y axis' for each of the two plots.
+
+To allow the dataframe and columns to change in response to user actions, the data, left, and right must all be reactive expressions.
+
+```{r}
+linkedScatter <- function(input, output, session,
+                          data, left, right) {
+    # yields the DF with an additional column selected_
+    # that indicates whether that observation is brushed
+    dataWithSelection <- reactive({
+        brushedPoints(data(), input$brush, allRows = TRUE)})
+
+    output$plot1 <- renderPlot({
+        scatterPlot(dataWithSelection(), left())})
+
+    output$plot2 <- renderPlot({
+       scatterPlot(dataWithSelection(), right())})
+
+    return(dataWithSelection)}
+```
+
+Notice that the linkedScatter function returns the dataWithSelection reactive. This allows the caller of the module to make use of the brushed data as well, such as showing it in a table below the plots for example.
+
+For clarity, we can use the plotting code in a standalone function. 
+
+```{r}
+scatterPlot <- function(data, cols) {
+    ggplot(data, aes_string(x = cols[1], y = cols[2])) +
+        geom_point(aes(color = selected_)) +
+        scale_color_manual(values = c("black", "#66D65C"), guide = FALSE)
+}
+```
+
+```{r}
+ui <- fixedPage(
+    h2("Module Example"),
+    linkedScatterUI("scatters"),
+    textOutput("summary"))
+
+server <- function(input, output, session) {
+    df <- callModule(linkedScatter,
+                     "scatters",
+                     reactive(mpg),
+                     left = reactive(c("cty", "hwy")),
+                     right = reactive(c("drv", "hwy")))
+
+    output$summary <- renderText({
+        sprintf("%d observation(s) selected",
+                nrow(filter(df(), selected_)))})}
+
+sp()
+```
+
+### Nesting Modules
+
+Modules can use other modules. When doing so, the outer module's UI function calls the inner module's ui function ensure that the id is wrapped in ns(). 
+
+In the following example, outerUI called innerUI. Notice that the id argument is `ns("inner1")`
+
+```{r}
+innerUI <- function(id) {
+    ns <- NS(id)
+    "This is the inner UI"
+}
+
+outerUI <- function(id) {
+    ns <- NS(id)
+    wellPanel(
+        innerUI(ns("inner1"))
+    )
+}
+```
+
+As for the module server functions, just ensure that the call to callModule for the inner module happens inside the outer module's server function. There is generally no need to use ns()
+
+```{r}
+inner <- function(in, out, sess) {
+    # inner logic
+}
+
+outer <- function(in, out, sess) {
+    innerResult <- callModule(inner, "inner1")
+    # outer logic
+}
+```
+
+### Using renderUI within modules
+
+Inside of a module, we may want to use uiOutput / renderUI. If our renderUI block contains inputs/outputs, we need to use ns() to wrap our ID arguments just like the examples above. Unfortunately, those `ns` instances were created using NS(id), and in this case there is no `id` parameter to use. What do? 
+
+The session parameter can provide the ns for you; just call `ns <- session$ns`. This will put the id in the same namespace as the session. 
+
+```{r}
+columnChooserUI <- function(id) {
+    ns <- NS(id)
+    uiOutput(ns("controls"))
+}
+
+columnChooser <- function(input, output, session, data) {
+    output$controls <- renderUI({
+        ns <- session$ns
+        selectInput(ns("col"), "Columns", names(data), multiple = TRUE)})
+
+    return(reactive({
+        validate(need(input$col, FALSE))
+        data[, input$col]}))
+}
+```
+
+```{r}
+selectInMam <- function(id, label, selected = "sleep_rem") {
+    ns <- NS(id)
+    choices <-  c("sleep_total", "sleep_rem", "sleep_cycle", 
+                  "awake", "brainwt", "bodywt")
+    
+    tagList(selectInput(inputId = ns("select"),
+                label = label,
+                choices = choices,
+                selected = selected))
+}
+
+filter_plot <- function(input, output, session, type) {
+    data <- reactive(filter(msleep, vore == type))
+
+    renderPlot({
+        ggplot(data(), aes_string(x = input$x,
+                                  y = input$y)) +
+            geom_point()})
+}
+
+ui <- fluidPage(
+    selectInMam("x", "x-axis"),
+    selectInMam("y", "y-axis", selected = "sleep_total"),
+    tabsetPanel(id = "vore",
+                tabPanel("Carnivore",
+                         plotOutput("plot_carni")),
+                tabPanel("Omnivore",
+                         plotOutput("plot_omni")),
+                tabPanel("Herbivore",
+                         plotOutput("plot_herbi"))))
+
+server <- function(input, output, session) {
+    output$plot_carni <- callModule(filter_plot, "mammal_plot1", type = "carni")
+    output$plot_omni <- callModule(filter_plot, "mammal_plot2", type = "omni")
+    output$plot_herbi <- callModule(filter_plot, "mammal_plot3", type = "herbi")
+}
+
+sp()
+```
+
+<!-- STILL BROKEN, FIX THIS^^^ -->
