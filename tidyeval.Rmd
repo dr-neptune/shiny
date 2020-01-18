@@ -1,0 +1,125 @@
+# Tidy Evaluation
+
+```{r}
+library(tidyverse)
+library(shiny)
+
+sp <- function() {
+    shinyApp(ui, server)
+}
+```
+
+### Side Tangent : Using ggplot2 in packages
+
+- if you know the mapping or facet specification is col in advance, use `aes(.data$col)` or `vars(.data$col)`
+- if col is a variable that contains the column name as a character vector, use `aes(.data[[col]])` or `vars(.data[[col]])`
+- if you want the behavior of col to look and feel like it would within `aes()` and `vars()`, use `aes({{col}})` or `vars({{col}})`
+
+# Motivation
+
+The key idea of tidy evaluation is that it blurs the line between two meanings of "variable":
+
+- environment variables (env-vars for short) are programming variables. Formally, they are between names and values that are usually created by `<-` 
+- data frame variables (data-vars for short) are statistical variables that live inside a data frame. In base R we usually access them with `$` and `[[`
+
+```{r}
+df <- data.frame(x = runif(3),
+                 y = runif(3))
+
+df$x
+```
+
+`df` is an env-var that contains two data-vars, `x` and `y`. 
+
+In base R, we write code that looks like this
+
+```{r}
+diamonds[diamonds$x == 0 | diamonds$y == 0, ]
+```
+
+the dplyr equivalent uses tidy evaluation to allow us to refer to a data var as if it were an environment variable
+
+```{r}
+diamonds %>% filter(x == 0 | y == 0)
+```
+
+We usually use these verbs purely with data vars, but they work equally well with env-vars
+
+```{r}
+min_carat <- 1
+
+diamonds %>% filter(carat > min_carat)
+```
+
+# Solutions
+
+## Tidy Eval in Shiny Apps
+
+The key to resolving this ambiguity is to make use of two pronouns that are built into tidy evaluation: `.data` and `.env`. These allow us to remove the ambiguity introduced by tidy evaluation. 
+
+For example, we could rewrite the filter used above
+
+```{r}
+diamonds %>% filter(.data$carat > .env$min_carat)
+```
+
+This isn't immediately useful in shiny apps because the results from inputs are usually strings and using `.data$var` isn't going to work because it's going to look for a data-var called `var`, not a data-var stored in the env-var `var`. Fortunately, base R has a solution for this: `.data[[var]]`
+
+```{r}
+ui <- fluidPage(
+    selectInput("var", "Variable", choices = names(diamonds)),
+    tableOutput("output"))
+
+server <- function(input, output, session) {
+    data <- reactive(filter(diamonds, input$var > 0))
+    output$output <- renderTable(head(data()))
+}
+
+sp()
+```
+
+This doesn't work because `input$var` isn't a data-var; it's an env-var containing the name of a data-var stored as a string. Unfortunately, it also fails to give a useful error message because `input$var` will be a string like "carat" and 
+
+```{r}
+"carat" > 0
+```
+
+This problem can be fixed by using `.data` and `[[`
+
+```{r}
+server <- function(input, output, session) {
+    data <- reactive(filter(diamonds, .data[[input$var]] > 0))
+    output$output <- renderTable(head(data()))
+}
+
+sp()
+```
+
+## Tidy Evaluation in Functions
+
+We could use `.data` and `[[`, but it doesn't create very user friendly functions:
+
+```{r}
+filter_var <- function(df, var, val) {
+    filter(df, .data[[var]] > val)
+}
+
+filter_var(diamonds, "carat", 4)
+```
+
+This is weird because it takes the name of the variable as a string, so it doesn't work in most other tidyverse functions. 
+
+```{r}
+filter_var <- function(df, var, val) {
+    filter(df, {{var}} > val)
+}
+
+filter_var(diamonds, carat, 4)
+```
+
+## Parse
+
+paste + parse + eval is tempting, but it has a major downside. It allows the users of your app to run arbitrary R code. This isn't that bad if only you are using the app, but it can create security holes if shared more widely. 
+
+# Case Studies
+
