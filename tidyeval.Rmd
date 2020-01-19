@@ -123,3 +123,269 @@ paste + parse + eval is tempting, but it has a major downside. It allows the use
 
 # Case Studies
 
+## Plotting 
+
+```{r}
+ui <- fluidPage(
+    selectInput("x", "X variable",
+                choices = names(iris)),
+    selectInput("y", "Y variable",
+                    choices = names(iris)),
+    plotOutput("plot"))
+
+server <- function(input, output, session) {
+    output$plot <- renderPlot({
+        ggplot(iris, aes(.data[[input$x]], .data[[input$y]])) +
+            geom_point(position = ggforce::position_auto()) +
+            labs(x = input$x, y = input$y)})}
+
+sp()
+```
+
+ggforce::position_auto was used to automatically spread the points out when one axis is discrete. Once tha basics of tidy evaluation are achieved, the challenge becomes how to make the app general enough to work with many different types of variable. 
+
+Instead of position_auto, we could allow the user to pick the geom
+
+```{r}
+ui <- fluidPage(
+    selectInput("x", "X variable", choices = names(iris)),
+    selectInput("y", "Y variable", choices = names(iris)),
+    selectInput("geom", "geom", c("point", "smooth", "jitter")),
+    plotOutput("plot"))
+
+server <- function(input, output, server) {
+    plot_geom <- reactive({
+        switch(input$geom,
+               point = geom_point(),
+               smooth = geom_smooth(se = FALSE),
+               jitter = geom_jitter())})
+
+    output$plot <- renderPlot({
+        ggplot(iris, aes(.data[[input$x]], .data[[input$y]])) +
+            plot_geom() +
+            labs(x = input$x, y = input$y)})}
+
+sp()
+```
+
+## Filtering and Arranging
+
+```{r}
+ui <- fluidPage(
+    selectInput("var", "Select Variable", choices = names(mtcars)),
+    sliderInput("min", "Minimum Value", 0, min = 0, max = 100),
+    selectInput("sort", "Sort By", choices = names(mtcars)),
+    tableOutput("data"))
+
+server <- function(input, output, session) {
+    observeEvent(input$var, {
+        rng <- range(mtcars[[input$var]])
+        updateSliderInput(session, "min",
+                          value = rng[[1]],
+                          min = rng[[1]],
+                          max = rng[[2]])})
+
+    output$data <- renderTable({
+        mtcars %>%
+            filter(.data[[input$var]] > input$min) %>%
+            arrange(.data[[input$sort]])})}
+
+sp()
+```
+
+Most other problems can be solved by combining this technique with existing skills. What if we wanted to conditionally sort in either ascending or descending order?
+
+```{r}
+ui <- fluidPage(
+    selectInput("var", "Sort By", choices = names(mtcars)),
+    checkboxInput("desc", "Descending Order?"),
+    tableOutput("data"))
+
+server <- function(input, output, session) {
+    sorted <- reactive({
+        if (input$desc) {
+            arrange(mtcars, desc(.data[[input$var]]))
+        } else {
+            arrange(mtcars, .data[[input$var]])
+        }
+    })
+
+    output$data <- renderTable(sorted())}
+
+sp()
+```
+
+# Additional Challenges
+
+## Selection Semantics
+
+Most tidyverse functions (like mutate, filter, group_by, aes) have action semantics -- they can perform any action inside of them. Other functions have selection semantics. Instead of general computation we can select variables using a special domain specific language that includes helpers like starts\_with and ends\_with. The most important function that has selection semantics is select, but the set also includes many tidyr functions like pivot\_longer, pivot\_wider, separate, extract, and unite functions. 
+
+Working with functions that use selection semantics is slihtly different than those that use action semantics because there is no .data pronoun. Instead we use the helper one\_of and all\_of/
+
+```{r}
+ui <- fluidPage(
+    selectInput("vars", "Variables", names(mtcars), multiple = TRUE),
+    tableOutput("data"))
+
+server <- function(input, output, session) {
+    output$data <- renderTable({
+        req(input$vars)
+        mtcars %>% select(one_of(input$vars))})}
+
+sp()
+```
+
+if we wanted all of the variables except those selected, we could use `-one_of(input$vars)`
+
+```{r}
+ui <- fluidPage(
+    selectInput("vars", "Variables", names(mtcars), multiple = TRUE),
+    tableOutput("data"))
+
+server <- function(input, output, session) {
+    output$data <- renderTable({
+        req(input$vars)
+        mtcars %>% select(-one_of(input$vars))})}
+
+sp()
+```
+
+## Multiple Variables
+
+Working with multiple variables is trivial when you're working with a function that uses selection semantics -- we can just pass a character vector of variable names in to one\_of / all\_of. 
+
+The challenge is operating on multiple variables when the function has action semantics, as is common with dplyr functions. 
+
+There are two ways to work with multiple variables, depending on what version of dplyr you are working with. We can illustrate them with an app that allows you to select any number of variables to count their unique values.
+
+```{r}
+ui <- fluidPage(
+    selectInput("vars", "Variables", names(mtcars), multiple = TRUE),
+    tableOutput("count"))
+```
+
+In dplyr 0.8 and earlier, every function that uses action semantics also has a variant that has selection semantics with the suffix _at. The easiest approach is just to switch from action to selection semantics by changing the function.
+
+```{r}
+server <- function(input, output, session) {
+    output$count <- renderTable({
+        req(input$vars)
+
+        mtcars %>%
+            group_by_at(input$vars) %>%
+            summarize(n = n())})}
+
+sp()
+```
+
+dplyr 1.0 provides a more flexible approach: inside of any function with action semantics, we can use across() to access selection semantics
+
+```{r}
+server <- function(input, output, session) {
+    output$count <- renderTable({
+        req(input$vars)
+
+        mtcars %>%
+            group_by(across(all_of(input$vars))) %>%
+            summarize(n = n())})}
+
+sp()
+```
+
+Things are mildly more complicated for mutate and summarize because we also need to supply a function to perform the operation.
+
+```{r}
+ui <- fluidPage(
+    selectInput("vars_g", "Group By", names(mtcars), multiple = TRUE),
+    selectInput("vars_s", "Summarize", names(mtcars), multiple = TRUE),
+    tableOutput("data"))
+
+# dplyr 0.8
+server <- function(input, output, session) {
+    output$data <- renderTable({
+        mtcars %>%
+            group_by_at(input$vars_g) %>%
+            summarize_at(.vars = input$vars_s, .funs = mean)})}
+
+sp()
+
+# dplyr 1.0
+server <- function(input, output, session) {
+    output$data <- renderTable({
+        mtcars %>%
+            group_by(across(all_of(input$vars_g))) %>%
+            summarize(across(all_of(inputs$vars_s), mean), n = n())})}
+
+sp()
+```
+
+## Action Semantics and User Supplied Data
+
+There is one additional complication when working with user supplied data and action semantics. Consider the following app: it allows the user to upload a tsv file, then select a variable, then filter by it. 
+
+```{r}
+ui <- fluidPage(
+    fileInput("data", "dataset", accept = ".tsv"),
+    selectInput("var", "var", character()),
+    numericInput("min", "min", 1, min = 0, step = 1),
+    tableOutput("output"))
+
+server <- function(input, output, session) {
+    data <- reactive({
+        req(input$data)
+        vroom::vroom(input$data$datapath)})
+
+    observeEvent(data(), {
+        updateSelectInput(session, "var", choices = names(data()))})
+
+    observeEvent(input$var, {
+        val <- data()[[input$var]]
+        updateNumericInput(session, "min", value = min(val))})
+
+    output$output <- renderTable({
+        req(input$var)
+
+        data() %>%
+            filter(.data[[input$var]] > input$min) %>%
+            arrange(.data[[input$var]]) %>%
+            head(10)})}
+
+sp()
+```
+
+There is a subtle problem with the use of filter(). 
+
+```{r}
+df <- data.frame(x = 1, y = 2)
+
+input <- list(var = "x", min = 0)
+
+df %>% filter(.data[[input$var]] > input$min)
+```
+
+What happens when there is a data frame that contains a variable named input? 
+
+```{r}
+df <- data.frame(x = 1, y = 2, input = 3)
+
+df %>% filter(.data[[input$var]] > input$min)
+```
+
+There is an error message because filter is trying to evaluate df$input$min.
+
+This problem is due to the ambiguity of data variables and env variables. Tidy eval always prefers to use a data variable if both are available. We can resolve the ambiguity by telling filter not to look in the data frame for input and instead only use an env-variable.
+
+```{r}
+df
+
+df %>% filter(.data[[input$var]] > .env$input$min)
+```
+
+Instead of .env, we could also use !!, e.g.
+
+```{r}
+df %>% filter(.data[[input$var]] > !!input$min)
+```
+
+
