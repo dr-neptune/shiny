@@ -5,3 +5,227 @@ library(tidyverse)
 library(shiny)
 ```
 
+The native languages of the web are HTML (for content), CSS (for syling), and JavaScript (for behavior). This chapter goes over how our R code gets translated into the HTML that's ultimately sent to the browser. Then we will be able to add arbitrary HTML and CSS to our shiny apps with ease.
+
+# HTML 101
+
+### Inline Formatting Tags 
+
+| tag      | behavior      |
+|----------|---------------|
+| <strong> | **bold text** |
+| <u>      | underline     |
+| <s>      | strikeout     |
+| <code>   | monospace     |
+
+### Block Tags
+
+| tag  | behavior    |
+|------|-------------|
+| <h1> | Heading     |
+| <hN> | subheadings |
+| <p>  | paragraph   |
+
+### Tags with Attributes
+
+Some tags need to do more than demarcate some text. An `<a>` for anchor tag needs a `href` attribute, e.g. `<a href="https://url.com>"`
+
+There are dozens of attributes that all tags accept and hundreds of attributes that are specific to particular tags: 
+
+(Global Attributes)[https://developer.mozilla.org/en-US/docs/Web/HTML/Global_attributes]
+
+The `id` attribute uniquely identifies a tag in a document. The web browser doesn't require the id tag, but it is very useful for identifying a tag for special treatment by CSS or JavaScript, so it plays a crucial role for Shiny apps.
+
+The `class` attribute provides a way of classifying tags in a document. Unlike `id`, any number of tags can have the same class, and each tag can have multiple classes. 
+
+As an example `<p id="storage-low-message" class="message warning">Storage space is runnin low!</p>`
+
+Here the id and class values have no effect, but we could do things like write CSS that any elements with the `message` class should have a yellow background and bold text and we could write JavaScript that automatically dismisses the message if the situation improves.
+
+## Escaping 
+
+In HTML there is a group of symbols used for escaping. For example, < and > have special meaning, so we need a different character if we want to insert the actual character into text. For < the escaped version is &lt; and > is &gt;
+
+Each escaped character in HTML starts with & and ends with ;. For another example, & is &amp;.
+
+# Generating HTML with tag Objects
+
+We can now talk about writing html with R.
+
+```{r}
+library(htmltools)
+```
+
+In html tools we create the same trees of parent and child tags, but we do so with R function calls instead of angle brackets.
+
+This
+
+`<p id="storage-low-message" class="message warning">Storage space is running low!</p>`
+
+Becomes 
+
+```{r}
+p(id = "storage-low-message", class = "message warning", "Storage space is running low!")
+```
+
+## Using functions to create tags
+
+htmltools comes with functions for the most common html tags 
+
+- <p>
+- <h1> - <h6>
+- <a>
+- <br>
+- <div>
+- <span>
+- <pre>
+- <code>
+- <img>
+- <strong>
+- <em>
+- <hr>
+
+when writing these, we can just use the tag name as the function name. 
+
+To write all the other tags, we need to prefix our tag name with `tags$`.
+
+For example
+
+```{r}
+tags$ul("Woah")
+```
+
+When writing a lot of html in R, we would get tired of writing `tags$`, so we can use `withTags` to wrap an R expression allowing us to omit the `tags$` prefix
+
+```{r}
+withTags(
+    ul(
+        li("Item 1"),
+        li("Item 2")))
+```
+
+In some obscure cases, even tags might not help. In this case, we can fall back to the `tag()` function and pass it any name
+
+```{r}
+tag("circle", list(cx = "10", cy = "10", r = "20", stroke = "blue", fill = "white"))
+```
+
+## Using named arguments to create attributes
+
+When calling a tag function, any named arguments become HTML attributes
+
+```{r}
+a(class = "btn btn-primary",
+  `data-toggle` = "collapse",
+  href = "#collapseExample",
+  "Link with href")
+```
+
+If an attribute has hyphens in its name, be sure to quote such names using backticks, or quotes. 
+
+We can also use NA, which includes the attribute but without a value
+
+```{r}
+tags$input(type = "checkbox", checked = NA)
+```
+
+or NULL, which means that the attribute should be ignored as if it wasn't included at all. This is useful for conditionally including attributes.
+
+```{r}
+is_checked <- FALSE
+
+tags$input(type = "checkbox", checked = if (is_checked) NA)
+```
+
+## Using unnamed arguments to create children
+
+Tag functions interpret unnamed arguments as children.
+
+## Tag Objects
+
+Tag objects can contain other tag objects. These can be nested as deeply as you like
+
+```{r}
+div(p(strong(a(href = "https://example.com", "A link"))))
+```
+
+## Plain Text
+
+```{r}
+p("I like turtles")
+
+str(LETTERS)
+
+# errors out
+div(LETTERS)
+
+# works fine
+div(paste(LETTERS, collapse = ","))
+```
+
+htmltools assumes that we wish to treat all characters as plain text, including those with special meaning. As a result, any special characters will be automatically escaped within the plain text
+
+```{r}
+div("The <strong> tag is used to create bold text")
+```
+
+## Verbatim HTML
+
+```{r}
+html_string <- "I just <em>love</em> writing HTML!"
+
+div(HTML(html_string))
+```
+
+**Warning**: Be careful when using the `HTML()` function. If the string you pass to it comes from an untrusted source, either indirectly or directly, it could compromise the security of your shiny app via an extremely common type of security vulnerability known as cross-site scripting (XSS). 
+
+## Lists
+
+While each call to a tag function can have as many unnamed arguments as you want, we can also pack multiple children into a single argument using list. 
+
+```{r}
+# these generate the same thing
+tags$ul(tags$li("A"),
+        tags$li("B"),
+        tags$li("C"))
+
+tags$ul(list(tags$li("A"),
+             tags$li("B"),
+             tags$li("C")))
+```
+
+This allows us to generate tag functions programmatically
+
+```{r}
+tags_out <- map(LETTERS[1:3], ~ tags$li(.x))
+
+tags$ul(!!!tags_out)
+```
+
+## NULL
+
+We can also use NULL as a tag child. They are, like NULL attributes, ignored and mainly supported to make conditional child items easier to express.
+
+```{r}
+show_beta_warning <- FALSE
+show_beta_warning <- TRUE
+
+div(
+    h3("Welcome to my Shiny app!"),
+    if (show_beta_warning) {
+        div(class = "alert alert-warning", role = "alert",
+            "Warning: this app is in beta; some features might not work!")})
+```
+
+## Mix and Match
+
+```{r}
+div("Text!",
+    strong("Tags!"),
+    HTML("Verbatim <span>HTML!</span>"),
+    NULL,
+    list("Lists!"))
+```
+
+# Customizing with CSS
+
