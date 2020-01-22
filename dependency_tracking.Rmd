@@ -1,0 +1,50 @@
+# Dependency Tracking
+
+```{r}
+library(tidyverse)
+library(shiny)
+```
+
+## How dependency tracking works 
+
+The most striking aspect of reactive programming in shiny is that a reactive expression, observer, or output "knows" which reactive values/inputs and reactive expressions it depends on. 
+
+For example:
+
+```{r}
+output$plot <- renderPlot({
+    plot(head(cars, input$rows))
+})
+```
+
+How does shiny know that output$plot reads input$rows?
+
+It doesn't parse the renderPlot block looking for input tags. That is what is called static analysis, because it looks at the code without running it. In contrast, shiny uses dynamic instrumentation, where as the code is rum it collects additional information about what is going on. 
+
+## Reactive Contexts 
+
+Before the plot output begins executing, it creates an object internal to shiny called a reactive context. The reactive context doesn't represent the plot output as a whole: just a single execution of the output. If, over the life of a shiny session, the plot is rerendered a dozen times, then a dozen reactive contexts will have been created.
+
+Shiny has a top level variable (like a global variable, but only visible to code inside the shiny package) that is always pointing to the current or active reactive context. The plot output assigns its new context to this variable, then executes its code block, then restores the previous value of the variable. 
+
+Basically, it works like this code sketch:
+
+```{r}
+# create new context
+ctx <- ReactiveContext$new()
+
+# set as the current context (but save the previous context)
+prev_ctx <- shiny:::currentContext
+shiny:::currentContext <- ctx
+
+# actually run user code here
+renderPlot({...})
+
+# restore the previous context
+shiny:::currentContext <- prev_ctx
+```
+
+The purpose of the context object is to provide a rendezvous point between the reactive comsumer that is executing and the reactive producers that its reading from. There are two important methods on context objects:
+
+- invalidate() - informs the context that a producer that it read from is now potentially out of date (invalidated). Whatever reactive consumer owns the context should also be considered out of date. 
+- onInvalidated(func) - Asks the context to invoke the given callback function in the future, if and when invalidate() is called

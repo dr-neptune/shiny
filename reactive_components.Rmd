@@ -1,0 +1,193 @@
+# Reactive Components
+
+```{r}
+library(tidyverse)
+library(shiny)
+```
+
+# Building Blocks 
+
+While there are lots of reactive programming related functions in shiny, there are three reactive primitives that they all build on.
+
+- reactive values, used to implement reactive inputs 
+- expressions 
+- observers, used to implement reactive outputs 
+
+
+#+DOWNLOADED: /tmp/screenshot.png @ 2020-01-21 21:41:13
+[[file:screenshot_2020-01-21_21-41-13.png]]
+
+# Reactive Values : Values that change over time 
+
+`inputs` are a special read only type of reactive values. Here we'll talk about the underlying reactive value primitive, which can be used in other ways. 
+
+Shiny provides a special syntax for reactive values because we need some way to update them over time and <- destroys the existing object. 
+
+A reactive value is a special type of function that returns its current value when called without arguments, and updates its value when called with a single argument. 
+
+```{r}
+val <- reactiveVal(10)
+
+# set
+val(20)
+
+# get
+val()
+```
+
+When handling multiple:
+
+```{r}
+vals <- reactiveValues(x = 1, y = 2)
+
+# set
+vals$y <- 100
+
+# get
+vals$x
+```
+
+The big difference between reactive values and ordinary R values is that reactive values track who accesses them, and when the value changes it automatically lets everyone know that there has been a change. A reactive read has implications for both now (returns the current value) and later (notifies of the next change to the value). 
+
+There are two fundamental types of reactive consumers in Shiny. One type is for actions (with side effects), the other is for calculations (no side effects).
+
+# Observers : Automatic Actions 
+
+Observers are reactive consumers that take a code block that performs an action of some kind. When a dependency changes, they re-run their code block. 
+
+Here is an observer that prints the value of x every time it changes 
+
+```{r}
+x <- reactiveVal(10)
+
+observe({
+    message("`x` is", x())
+})
+
+x(5)
+```
+
+Note that observers force eager evaluation of the reactive expressions they refer to. Observers also aren't limited to reading a single reactive value; they can also read zero or many reactive values. 
+
+## Reactive Expressions : Smart Calculations 
+
+Reactive expressions are the other fundamental type of reactive consumer. While observers model actions that have side effects, reactive expressions model calculations that return values. 
+
+Here is a simple reactive expression that generates a sequence of numbers based on input$x. 
+
+```{r}
+up_to_x <- reactive({
+    seq_len(x)
+})
+```
+
+Creating this reactive expression doesn't cause any code to execute, but it makes the sequence of numbers available for retrieval. In this sense, creating a reactive expression is like declaring an R function. 
+
+Just like with reading reactive values, reactive expressions are only readable by reactivity aware consumers - becuase instead of just asking for the sequence of numbers up to x, it is also going to inform the caller if something about the sequence changes. 
+
+Reactive expressions are also lazy : they contain code, but that code doesn't execute unless / until someone tries to actually retrieve the value of the reactive expression (by calling it like a function). 
+
+They also cache their most recent value. The first time a reactive expression is called, it will execute its code body. When complete, the resulting value will be both returned to the caller and remembered by the reactive expression. 
+
+# inputs and outputs
+
+## inputs
+
+## outputs 
+
+```{r}
+output$text <- renderText({
+    paste(up_to_x(), collapse = ", ")
+})
+```
+
+is this an observer or a reactive expression?
+
+outputs are neither, they are reactive consumers. Output code is allowed to read reactive values like input$x or reactive expressions like `up_to_x()` and the output will know when those reactive dependencies change. 
+
+Whereas observers execute eagerly and reactive expressions execute lazily, outputs are somewhere in between. When an output's corresponding ui element is visible in the browser, output executes eagerly. However, if the UI element becomes hidden (e.g on a tabPanel), then shiny automatically suspends that output from reactively executing. 
+
+# Creating Components 
+
+https://github.com/hadley/shinySignals/
+
+## Isolate
+
+Generally, you don't need to use reactiveValues() yourself. It can be quite useful for maintaining state, but we must be careful to avoid getting caught in an infinite loop
+
+```{r}
+count <- function(signal) {
+    val <- reactiveVal(0)
+
+    observe({
+        signal()
+        val(val() + 1)
+    })
+
+    reactive(val())
+}
+```
+
+Whenever you modify a reactive value based on a previous value you need to use isolate to avoid getting stuck in an infinite loop. 
+
+```{r}
+count <- function(signal) {
+    val <- reactiveVal(0)
+
+    observe({
+        signal()
+        val(isolate(val()) + 1)
+    })
+
+    reactive(val())
+}
+```
+
+## Temporal Dependence
+
+```{r}
+dropRepeats <- function(signal) {
+    val <- reactiveVal()
+
+    observe({
+        cur_val <- isolate(val())
+        new_val <- signal()
+
+        if (!identical(cur_val, new_val)) {
+            val(new_val)
+        }})
+
+    reactive(val)
+}
+```
+
+https://plotly-r.com/linking-views-with-shiny.html#reactive-vals
+
+```{r}
+brush <- function(n, mode = "|") {
+    selected <- reactiveVal(rep(FALSE, n))
+
+    list(
+        brush = function(new) {
+            selected(do.call(mode, isolate(selected()), new))
+        },
+        reset = function() {
+            selected(rep(FALSE, n))
+        },
+        selected = reactive(selected))}
+```
+
+## Combining Reactives
+
+```{r}
+merge <- function(signal1, signal2) {
+    val <- retrieveVal()
+
+    observe(val(signal1()))
+    observe(val(signal2()))
+
+    reactive(val())
+}
+```
+
+

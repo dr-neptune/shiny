@@ -229,3 +229,7 @@ div("Text!",
 
 # Customizing with CSS
 
+CSS specifies the visual style and layout of the page. 
+
+## Intro to CSS
+

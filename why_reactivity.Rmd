@@ -1,0 +1,131 @@
+# Why Reactivity?
+
+```{r}
+library(tidyverse)
+library(shiny)
+```
+
+Reactive programming is a style of programming that emphasizes values that change over time and calculations and actions that depend on those values. 
+
+For shiny apps to be useful, we need two things:
+
+- expressions and outputs should update whenever one of their input values changes. This ensures input and output stay in sync
+- expressions and outputs should update _only_ when one of their inputs changes. 
+
+## Why not variables?
+
+variables can change over time, but they never change automatically.
+
+## What about functions?
+
+We could solve the changing temperature problem like so:
+
+```{r}
+temp_c <- 10
+
+temp_f <- function() {
+    message("Converting")
+    (temp_c + 32) * 9 / 5
+}
+
+temp_f()
+```
+
+This solves the first problem in that whenever we access temp_f, it gives the latest computation 
+
+```{r}
+temp_c <- 4
+
+temp_f()
+```
+
+This doesn't solve the second problem however, because every time you call temp_f it recomputes. 
+
+```{r}
+temp_f()
+```
+
+## Event Driven Programming 
+
+Since neither variables nor functions work, we need to create something new. In previous decades we would have implemented event driven programming. It is a simple paradigm in which you register callback functions to be executed in response to events (e.g. a mouse click or a textbox value being changed).
+
+We could implement a very simple event driven toolkit using R6. 
+
+A DynamicValue has 3 important methods: get(), set() and to change the underlying value, onUpdate(). 
+
+```{r}
+DynamicValue <- R6class("DynamicValue",
+                        list(
+                            value = NULL,
+                            on_update = NULL,
+                            get = function() self$value,
+                            set = function(value) {
+                                self$value <- value
+                                if (!is.null(self$on_update))
+                                    self$on_update()
+                                invisible(self)},
+                            onUpdate = function(action) {
+                                self$on_update <- rlang::as_function(rlang::enquo(action))
+                                invisible(self)}))
+```
+
+So if Shiny had been invented five years earlier?
+
+```{r}
+temp_c <- DynamicValue$new()
+
+temp_c$onUpdate({
+    message("converting")
+    temp_f <<- (temp_c$get() + 32) * 9 / 5
+})
+
+temp_c$set(10)
+
+temp_f
+
+temp_c$set(-3)
+
+temp_f
+```
+
+Unfortunately, this will have a tough time as the program gets larger. Over time it will become difficult to keep track of what inputs affect what calculations, and what calculations affect each other, and what inputs and calculations affect what outputs and actions. Before long we start to trade off correctness (update whenever anything changes) against performance (update only the necessary parts and hope you dont miss any edge cases). 
+
+## Reactive Programming
+
+Reactive programming elegantly solves both of the problems by combining features of the solutions above. 
+
+```{r}
+library(shiny)
+consoleReactive(TRUE)
+```
+
+As with event drive programming, we need some way to indicate that we have a special type of variable, a reactive value, created with shiny::reativeVal(). 
+
+To get this value, you call it like a function; to set the value, you call it with a value
+
+```{r}
+temp_c <- reactiveVal(10)
+
+# get
+temp_c()
+
+# set
+temp_c(20)
+
+# get
+temp_c()
+```
+
+Now we can create a reactive expression that depends on this value. As we've seen previously, a reactive expression automatically tracks all of its dependencies.
+
+```{r}
+temp_f <- reactive({
+    message("converting")
+    (temp_c() + 32) * 9 / 5
+})
+
+temp_f()
+```
+
+Later, if `temp_c` changes then `temp_f` will be up to date. Note that the conversion only happens if we request the value of temp_f() (unlike the event driven approach), and the computation happens only once (unlike the functional approach). A reactive expression caches the result of the last call and will only recompute if one of the inputs changes. Together, these properties ensure that shiny does as little work as possible, making our app as efficient as possible. 
+
